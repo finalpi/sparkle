@@ -1,4 +1,4 @@
-import { ChildProcess, execFile, execFileSync, spawn } from 'child_process'
+import { ChildProcess, execFile, execFileSync, spawn, exec } from 'child_process'
 import {
   dataDir,
   logPath,
@@ -43,6 +43,7 @@ import { getAxios } from './mihomoApi'
 import { setSysDns } from '../service/api'
 
 const ctlParam = process.platform === 'win32' ? '-ext-ctl-pipe' : '-ext-ctl-unix'
+const execPromise = promisify(exec)
 
 class UserCancelledError extends Error {
   constructor(message = '用户取消操作') {
@@ -72,6 +73,103 @@ let networkDownHandled = false
 
 let child: ChildProcess
 let retry = 10
+
+/**
+ * 清理占用管道的残留进程
+ * 在Windows上查找并终止所有mihomo相关进程，确保管道可用
+ */
+async function cleanupPipeAndProcesses(): Promise<void> {
+  if (process.platform !== 'win32') {
+    return
+  }
+
+  try {
+    await writeFile(logPath(), '[Manager]: 开始清理管道和残留进程\n', { flag: 'a' })
+
+    // 查找所有mihomo进程
+    const { stdout } = await execPromise(
+      'powershell -Command "Get-Process | Where-Object {$_.ProcessName -like \'*mihomo*\'} | Select-Object Id,ProcessName,Path | ConvertTo-Json"',
+      { encoding: 'utf8' }
+    )
+
+    if (!stdout || stdout.trim() === '') {
+      await writeFile(logPath(), '[Manager]: 没有发现残留的mihomo进程\n', { flag: 'a' })
+      return
+    }
+
+    let processes: Array<{ Id: number; ProcessName: string; Path: string | null }> = []
+    try {
+      const parsed = JSON.parse(stdout)
+      processes = Array.isArray(parsed) ? parsed : [parsed]
+    } catch {
+      // 如果解析失败，可能没有进程或格式不对
+      return
+    }
+
+    // 过滤掉当前进程（如果child存在）
+    const currentPid = child?.pid
+    const processesToKill = processes.filter((p) => p.Id !== currentPid && p.Id !== process.pid)
+
+    if (processesToKill.length === 0) {
+      await writeFile(logPath(), '[Manager]: 没有需要清理的进程\n', { flag: 'a' })
+      return
+    }
+
+    await writeFile(
+      logPath(),
+      `[Manager]: 发现 ${processesToKill.length} 个残留进程: ${processesToKill.map((p) => `${p.ProcessName}(${p.Id})`).join(', ')}\n`,
+      { flag: 'a' }
+    )
+
+    // 依次终止这些进程
+    for (const proc of processesToKill) {
+      try {
+        // 先尝试正常终止
+        await execPromise(`taskkill /PID ${proc.Id} /T`, { timeout: 2000 })
+        await writeFile(logPath(), `[Manager]: 成功终止进程 ${proc.Id}\n`, { flag: 'a' })
+      } catch {
+        try {
+          // 如果失败，强制终止
+          await execPromise(`taskkill /F /PID ${proc.Id} /T`, { timeout: 2000 })
+          await writeFile(logPath(), `[Manager]: 强制终止进程 ${proc.Id}\n`, { flag: 'a' })
+        } catch (error) {
+          await writeFile(
+            logPath(),
+            `[Manager]: 无法终止进程 ${proc.Id}: ${error}\n`,
+            { flag: 'a' }
+          )
+        }
+      }
+    }
+
+    // 等待进程完全退出和管道释放
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await writeFile(logPath(), '[Manager]: 管道清理完成\n', { flag: 'a' })
+  } catch (error) {
+    await writeFile(logPath(), `[Manager]: 清理管道时出错: ${error}\n`, { flag: 'a' })
+  }
+}
+
+/**
+ * 检测管道是否可用
+ * 在Windows上尝试短暂连接管道来验证其可用性
+ */
+async function checkPipeAvailability(): Promise<boolean> {
+  if (process.platform !== 'win32') {
+    return true
+  }
+
+  return new Promise((resolve) => {
+    const pipePath = mihomoIpcPath()
+    const testCmd = `powershell -Command "Test-Path '${pipePath}'"`
+
+    exec(testCmd, { timeout: 1000 }, (_error, stdout) => {
+      // 如果管道不存在（返回False），说明可用
+      const available = !stdout.trim().toLowerCase().includes('true')
+      resolve(available)
+    })
+  })
+}
 
 export async function startCore(detached = false): Promise<Promise<void>[]> {
   const {
@@ -103,6 +201,36 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   await generateProfile()
   await checkProfile()
   await stopCore()
+
+  // Windows平台特殊处理：清理管道和残留进程
+  if (process.platform === 'win32') {
+    // 等待stopCore完全完成，确保管道释放
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // 检测管道是否可用
+    const isPipeAvailable = await checkPipeAvailability()
+    if (!isPipeAvailable) {
+      await writeFile(
+        logPath(),
+        '[Manager]: 检测到管道被占用，开始清理残留进程\n',
+        { flag: 'a' }
+      )
+      await cleanupPipeAndProcesses()
+
+      // 清理后再次检测
+      const retryCheck = await checkPipeAvailability()
+      if (!retryCheck) {
+        await writeFile(
+          logPath(),
+          '[Manager]: 警告：管道可能仍被占用，尝试继续启动\n',
+          { flag: 'a' }
+        )
+        // 再等待一段时间
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }
+    }
+  }
+
   if (tun?.enable && autoSetDNSMode !== 'none') {
     try {
       await setPublicDNS()
@@ -179,7 +307,9 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
         (process.platform !== 'win32' && str.includes('External controller unix listen error')) ||
         (process.platform === 'win32' && str.includes('External controller pipe listen error'))
       ) {
-        reject(`控制器监听错误:\n${str}`)
+        const errorMsg = `控制器监听错误:\n${str}\n\n可能的原因：\n1. 管道被其他进程占用\n2. 上次内核未正常退出\n\n已尝试自动清理，如问题持续，请尝试：\n- 重启应用\n- 手动结束所有mihomo进程\n- 重启计算机`
+        await writeFile(logPath(), `[Manager]: ${errorMsg}\n`, { flag: 'a' })
+        reject(errorMsg)
       }
 
       if (process.platform === 'win32' && str.includes('updater: finished')) {
