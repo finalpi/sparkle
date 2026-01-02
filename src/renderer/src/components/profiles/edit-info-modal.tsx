@@ -12,7 +12,11 @@ import {
   DropdownTrigger,
   DropdownMenu,
   DropdownItem,
-  Tooltip
+  Tooltip,
+  Select,
+  SelectItem,
+  Tabs,
+  Tab
 } from '@heroui/react'
 import React, { useState } from 'react'
 import SettingItem from '../base/base-setting-item'
@@ -145,29 +149,135 @@ const EditInfoModal: React.FC<Props> = (props) => {
                 />
               </SettingItem>
               {values.autoUpdate && (
-                <SettingItem
-                  title="更新间隔（分钟）"
-                  actions={
-                    values.locked && (
-                      <Tooltip content="当前更新间隔由远程管理">
+                <>
+                  <SettingItem
+                    title="锁定更新配置"
+                    actions={
+                      <Tooltip content="开启后，更新配置将不可手动修改，通常由远程订阅服务器管理">
                         <Button isIconOnly size="sm" variant="light">
                           <IoIosHelpCircle className="text-lg" />
                         </Button>
                       </Tooltip>
-                    )
-                  }
-                >
-                  <Input
-                    size="sm"
-                    type="number"
-                    className={cn(inputWidth)}
-                    value={values.interval?.toString() ?? ''}
-                    onValueChange={(v) => {
-                      setValues({ ...values, interval: parseInt(v) })
-                    }}
-                    disabled={values.locked}
-                  />
-                </SettingItem>
+                    }
+                  >
+                    <Switch
+                      size="sm"
+                      isSelected={values.locked ?? false}
+                      onValueChange={(v) => {
+                        setValues({ ...values, locked: v })
+                      }}
+                    />
+                  </SettingItem>
+                  <SettingItem title="更新方式">
+                    <Tabs
+                      size="sm"
+                      color="primary"
+                      selectedKey={values.updateSchedule?.type || 'interval'}
+                      onSelectionChange={(key) => {
+                        const type = key as 'interval' | 'daily' | 'weekly'
+                        setValues({
+                          ...values,
+                          updateSchedule: {
+                            type,
+                            time: values.updateSchedule?.time || '00:00',
+                            weekday: values.updateSchedule?.weekday || 0
+                          }
+                        })
+                      }}
+                      isDisabled={values.locked}
+                    >
+                      <Tab key="interval" title="按间隔" />
+                      <Tab key="daily" title="每天" />
+                      <Tab key="weekly" title="每周" />
+                    </Tabs>
+                  </SettingItem>
+
+                  {(!values.updateSchedule || values.updateSchedule.type === 'interval') && (
+                    <SettingItem title="更新间隔（分钟）">
+                      <Input
+                        size="sm"
+                        type="number"
+                        className={cn(inputWidth)}
+                        value={values.interval?.toString() ?? ''}
+                        onValueChange={(v) => {
+                          setValues({ ...values, interval: parseInt(v) })
+                        }}
+                        disabled={values.locked}
+                      />
+                    </SettingItem>
+                  )}
+
+                  {values.updateSchedule?.type === 'daily' && (
+                    <SettingItem title="更新时间">
+                      <Input
+                        size="sm"
+                        type="time"
+                        className="w-[150px]"
+                        value={values.updateSchedule.time || '00:00'}
+                        onValueChange={(v) => {
+                          setValues({
+                            ...values,
+                            updateSchedule: { ...values.updateSchedule, type: 'daily', time: v }
+                          })
+                        }}
+                        disabled={values.locked}
+                      />
+                    </SettingItem>
+                  )}
+
+                  {values.updateSchedule?.type === 'weekly' && (
+                    <>
+                      <SettingItem title="星期几">
+                        <Select
+                          size="sm"
+                          className="w-[150px]"
+                          selectedKeys={new Set([
+                            (values.updateSchedule.weekday ?? 0).toString()
+                          ])}
+                          onSelectionChange={(keys) => {
+                            const weekday = parseInt(Array.from(keys)[0] as string)
+                            setValues({
+                              ...values,
+                              updateSchedule: {
+                                ...values.updateSchedule,
+                                type: 'weekly',
+                                weekday
+                              }
+                            })
+                          }}
+                          isDisabled={values.locked}
+                        >
+                          <SelectItem key="0">周日</SelectItem>
+                          <SelectItem key="1">周一</SelectItem>
+                          <SelectItem key="2">周二</SelectItem>
+                          <SelectItem key="3">周三</SelectItem>
+                          <SelectItem key="4">周四</SelectItem>
+                          <SelectItem key="5">周五</SelectItem>
+                          <SelectItem key="6">周六</SelectItem>
+                        </Select>
+                      </SettingItem>
+                      <SettingItem title="更新时间">
+                        <Input
+                          size="sm"
+                          type="time"
+                          className="w-[150px]"
+                          value={values.updateSchedule.time || '00:00'}
+                          onValueChange={(v) => {
+                            setValues({
+                              ...values,
+                              updateSchedule: {
+                                ...values.updateSchedule,
+                                type: 'weekly',
+                                time: v
+                              }
+                            })
+                          }}
+                          disabled={values.locked}
+                        />
+                      </SettingItem>
+                    </>
+                  )}
+                </>
               )}
             </>
           )}

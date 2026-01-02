@@ -138,6 +138,12 @@ interface ProfileItem {
   substore?: boolean
   locked?: boolean
   autoUpdate?: boolean
+  // 定时更新配置
+  updateSchedule?: {
+    type: 'interval' | 'daily' | 'weekly' // 更新类型：间隔、每日、每周
+    time?: string // 时间 HH:mm 格式，用于 daily 和 weekly
+    weekday?: number // 星期几 0-6 (0=周日)，用于 weekly
+  }
 }
 
 interface SubscriptionUserInfo {

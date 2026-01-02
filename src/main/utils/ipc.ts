@@ -46,7 +46,8 @@ import {
   removeOverrideItem,
   getOverride,
   setOverride,
-  updateOverrideItem
+  updateOverrideItem,
+  refreshProfile
 } from '../config'
 import {
   startSubStoreFrontendServer,
@@ -204,6 +205,7 @@ export function registerIpcMainHandlers(): void {
   ipcMain.handle('changeCurrentProfile', (_e, id) => ipcErrorWrapper(changeCurrentProfile)(id))
   ipcMain.handle('addProfileItem', (_e, item) => ipcErrorWrapper(addProfileItem)(item))
   ipcMain.handle('removeProfileItem', (_e, id) => ipcErrorWrapper(removeProfileItem)(id))
+  ipcMain.handle('refreshProfile', (_e, id) => ipcErrorWrapper(refreshProfile)(id))
   ipcMain.handle('getOverrideConfig', (_e, force) => ipcErrorWrapper(getOverrideConfig)(force))
   ipcMain.handle('setOverrideConfig', (_e, config) => ipcErrorWrapper(setOverrideConfig)(config))
   ipcMain.handle('getOverrideItem', (_e, id) => ipcErrorWrapper(getOverrideItem)(id))

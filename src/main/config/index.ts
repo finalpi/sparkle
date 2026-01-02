@@ -15,7 +15,8 @@ export {
   getProfileParseStr,
   setProfileStr,
   changeCurrentProfile,
-  updateProfileItem
+  updateProfileItem,
+  refreshProfile
 } from './profile'
 export {
   getOverrideConfig,

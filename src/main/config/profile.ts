@@ -66,8 +66,16 @@ export async function updateProfileItem(item: ProfileItem): Promise<void> {
     throw new Error('Profile not found')
   }
   config.items[index] = item
-  if (!item.autoUpdate) await delProfileUpdater(item.id)
   await setProfileConfig(config)
+  
+  // 重新设置定时器
+  if (!item.autoUpdate) {
+    // 关闭自动更新，删除定时器
+    await delProfileUpdater(item.id)
+  } else {
+    // 开启自动更新，重新设置定时器
+    await addProfileUpdater(item)
+  }
 }
 
 export async function addProfileItem(item: Partial<ProfileItem>): Promise<void> {
@@ -111,6 +119,22 @@ export async function removeProfileItem(id: string): Promise<void> {
   await delProfileUpdater(id)
 }
 
+/**
+ * 手动刷新订阅（强制更新）
+ * @param id 订阅 ID
+ */
+export async function refreshProfile(id: string): Promise<void> {
+  const item = await getProfileItem(id)
+  if (!item) {
+    throw new Error('订阅不存在')
+  }
+  if (item.type !== 'remote') {
+    throw new Error('只能刷新远程订阅')
+  }
+  // 调用 addProfileItem 会触发更新
+  await addProfileItem(item)
+}
+
 export async function getCurrentProfileItem(): Promise<ProfileItem> {
   const { current } = await getProfileConfig()
   return (await getProfileItem(current)) || { id: 'default', type: 'local', name: '空白订阅' }
@@ -118,6 +142,10 @@ export async function getCurrentProfileItem(): Promise<ProfileItem> {
 
 export async function createProfile(item: Partial<ProfileItem>): Promise<ProfileItem> {
   const id = item.id || new Date().getTime().toString(16)
+  
+  // 获取现有配置（如果是更新）
+  const existingItem = await getProfileItem(id)
+  
   const newItem = {
     id,
     name: item.name || (item.type === 'remote' ? 'Remote File' : 'Local File'),
@@ -131,7 +159,10 @@ export async function createProfile(item: Partial<ProfileItem>): Promise<Profile
     interval: item.interval || 0,
     override: item.override || [],
     useProxy: item.useProxy || false,
-    updated: new Date().getTime()
+    updated: new Date().getTime(),
+    // 保留现有的 updateSchedule 和 locked 状态
+    updateSchedule: item.updateSchedule || existingItem?.updateSchedule,
+    locked: item.locked !== undefined ? item.locked : existingItem?.locked
   } as ProfileItem
   switch (newItem.type) {
     case 'remote': {
@@ -251,10 +282,20 @@ export async function createProfile(item: Partial<ProfileItem>): Promise<Profile
         k.toLowerCase().endsWith('profile-update-interval')
       )
       if (intervalKey) {
-        newItem.interval = parseInt(headers[intervalKey]) * 60
-        if (newItem.interval) {
-          newItem.locked = true
+        const remoteInterval = parseInt(headers[intervalKey]) * 60
+        
+        // 处理服务器返回的更新间隔优先级：
+        // 1. 如果用户手动设置了 updateSchedule（定时更新），保留用户配置
+        // 2. 如果用户手动锁定了配置（locked = true），保留用户配置  
+        // 3. 否则使用服务器返回的间隔
+        if (!existingItem?.updateSchedule && !existingItem?.locked) {
+          newItem.interval = remoteInterval
+          newItem.updateSchedule = undefined // 清除 updateSchedule，使用 interval
+          if (newItem.interval) {
+            newItem.locked = true // 服务器管理的订阅，自动锁定
+          }
         }
+        // 如果用户有自定义配置，保留用户的 updateSchedule 和 locked 状态
       }
       const userinfoKey = Object.keys(headers).find((k) =>
         k.toLowerCase().endsWith('subscription-userinfo')
