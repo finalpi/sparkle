@@ -378,7 +378,17 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
                   new Promise((r) => setTimeout(r, 100)).then(() =>
                     patchMihomoConfig({ 'log-level': logLevel })
                   )
-                ]).then(() => resolve())
+                ])
+                  .then(() => resolve())
+                  .catch(async (error) => {
+                    // 记录错误但不影响核心启动成功
+                    await writeFile(
+                      logPath(),
+                      `[Manager]: 核心启动后操作失败（不影响核心运行）: ${error instanceof Error ? error.message : JSON.stringify(error)}\n`,
+                      { flag: 'a' }
+                    )
+                    resolve()
+                  })
               }
             }
             child.stdout?.on('data', (data) => {

@@ -9,6 +9,7 @@ import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
 import PortSetting from '@renderer/components/mihomo/port-setting'
 import { platform } from '@renderer/utils/init'
+import { formatError } from '@renderer/utils/error'
 import { IoMdCloudDownload } from 'react-icons/io'
 import PubSub from 'pubsub-js'
 import {
@@ -91,7 +92,7 @@ const Mihomo: React.FC = () => {
       await restartCore()
       PubSub.publish('mihomo-core-changed')
     } catch (e) {
-      alert(e)
+      alert(formatError(e))
     }
   }
 
@@ -104,7 +105,7 @@ const Mihomo: React.FC = () => {
       if (typeof e === 'string' && e.includes('already using latest version')) {
         new Notification('已经是最新版本')
       } else {
-        alert(e)
+        alert(formatError(e))
       }
     } finally {
       setUpgrading(false)
