@@ -7,10 +7,10 @@ on:
         description: 'Tag version to release'
         required: false
   push:
-    branches:
-      - master
     tags:
       - v*
+    # branches:
+    #   - master  # 注释掉，避免每次提交都触发构建
     paths-ignore:
       - 'README.md'
       - '.github/ISSUE_TEMPLATE/**'
