@@ -113,6 +113,8 @@ interface AppConfig {
   displayAppName?: boolean
   disableGPU: boolean
   disableAnimation?: boolean
+  prependRules?: string[]
+  appendRules?: string[]
 }
 
 interface ProfileConfig {

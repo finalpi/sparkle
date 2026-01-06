@@ -49,6 +49,9 @@ export async function generateProfile(): Promise<void> {
 
   const profile = deepMerge(JSON.parse(JSON.stringify(currentProfile)), configToMerge)
 
+  // 应用前置和后置规则
+  await applyCustomRules(profile)
+
   await cleanProfile(profile, controlDns, controlSniff)
 
   runtimeConfig = profile
@@ -60,6 +63,29 @@ export async function generateProfile(): Promise<void> {
     diffWorkDir ? mihomoWorkConfigPath(current) : mihomoWorkConfigPath('work'),
     runtimeConfigStr
   )
+}
+
+/**
+ * 应用用户自定义的前置和后置规则
+ * @param profile mihomo配置对象
+ */
+async function applyCustomRules(profile: MihomoConfig): Promise<void> {
+  const { prependRules = [], appendRules = [] } = await getAppConfig()
+  
+  // 确保rules数组存在
+  if (!Array.isArray(profile.rules)) {
+    profile.rules = []
+  }
+
+  // 前置规则：插入到数组最前面
+  if (prependRules.length > 0) {
+    profile.rules = [...prependRules, ...profile.rules]
+  }
+
+  // 后置规则：追加到数组最后面
+  if (appendRules.length > 0) {
+    profile.rules = [...profile.rules, ...appendRules]
+  }
 }
 
 async function cleanProfile(
