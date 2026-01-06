@@ -62,7 +62,7 @@ linux:
     - deb
     - rpm
     - pacman
-  maintainer: xishang0128
+  maintainer: finalpi
   category: Utility
   artifactName: ${name}-linux-${version}-${arch}.${ext}
 deb:

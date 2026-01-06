@@ -3,8 +3,8 @@
   "version": "1.6.18",
   "description": "Sparkle",
   "main": "./out/main/index.js",
-  "author": "xishang0128",
-  "homepage": "https://github.com/xishang0128/sparkle",
+  "author": "finalpi",
+  "homepage": "https://github.com/finalpi/sparkle",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",

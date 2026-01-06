@@ -83,18 +83,27 @@ jobs:
           GIT_COMMIT_HASH=$(git rev-parse --short HEAD)
           VERSION=$(jq -r '.version' package.json)
 
-          if [ "${{ github.event.inputs.version }}" == "" ]; then
-            BASE_VERSION=$(echo $VERSION | awk -F. '{print $1"."$2"."$3+1}')
-            VERSION_PREFIX=${VERSION_PREFIX:-beta}
-            RELEASE_VERSION="${BASE_VERSION}-${VERSION_PREFIX}-${GIT_COMMIT_HASH}"
-          else
+          # 判断是否为正式发布（推送 tag 或手动指定版本）
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            # 从 tag 获取版本号
+            RELEASE_VERSION="${{ github.ref_name }}"
+            RELEASE_VERSION=$(echo "$RELEASE_VERSION" | sed 's/^v//')
+            echo "正式版本（从 tag）: $RELEASE_VERSION"
+          elif [ "${{ github.event.inputs.version }}" != "" ]; then
+            # 从手动输入获取版本号
             INPUT_VERSION="${{ github.event.inputs.version }}"
-            CLEAN_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
-            if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            RELEASE_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
+            if [[ ! "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Invalid version format: $INPUT_VERSION"
               exit 1
             fi
-            RELEASE_VERSION="$CLEAN_VERSION"
+            echo "正式版本（手动指定）: $RELEASE_VERSION"
+          else
+            # 生成 beta 版本
+            BASE_VERSION=$(echo $VERSION | awk -F. '{print $1"."$2"."$3+1}')
+            VERSION_PREFIX=${VERSION_PREFIX:-beta}
+            RELEASE_VERSION="${BASE_VERSION}-${VERSION_PREFIX}-${GIT_COMMIT_HASH}"
+            echo "开发版本: $RELEASE_VERSION"
           fi
 
           jq --arg version "$RELEASE_VERSION" '.version = $version' package.json > tmp.json && mv tmp.json package.json
@@ -318,14 +327,14 @@ jobs:
         uses: 8Mi-Tech/delete-release-assets-action@main
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref }}
+          tag: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref_name }}
           deleteOnlyFromDrafts: false
 
       - name: Publish Release
         if: success()
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref }}
+          tag_name: ${{ github.event.inputs.version != '' && github.event.inputs.version || github.ref_name }}
           body_path: changelog.md
           files: |
             latest.yml

@@ -37,7 +37,7 @@ const Settings: React.FC = () => {
             className="app-nodrag"
             title="GitHub 仓库"
             onPress={() => {
-              window.open('https://github.com/xishang0128/sparkle')
+              window.open('https://github.com/finalpi/sparkle')
             }}
           >
             <IoLogoGithub className="text-lg" />

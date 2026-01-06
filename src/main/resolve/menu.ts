@@ -171,13 +171,13 @@ export async function createApplicationMenu(): Promise<void> {
         {
           label: '了解更多',
           click: () => {
-            shell.openExternal('https://github.com/xishang0128/sparkle')
+            shell.openExternal('https://github.com/finalpi/sparkle')
           }
         },
         {
           label: '报告问题',
           click: () => {
-            shell.openExternal('https://github.com/xishang0128/sparkle/issues')
+            shell.openExternal('https://github.com/finalpi/sparkle/issues')
           }
         },
         { type: 'separator' },
