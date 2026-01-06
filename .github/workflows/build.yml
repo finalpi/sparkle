@@ -276,12 +276,25 @@ jobs:
 
       - name: Update Version
         run: |
-          INPUT_VERSION="${{ github.event.inputs.version }}"
+          # 从 tag 或手动输入获取版本号
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT_VERSION="${{ github.event.inputs.version }}"
+          else
+            INPUT_VERSION="${{ github.ref_name }}"
+          fi
+          
           CLEAN_VERSION=$(echo "$INPUT_VERSION" | sed 's/^v//')
           if [[ ! "$CLEAN_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Invalid version format: $INPUT_VERSION"
             exit 1
           fi
+          
+          CURRENT_VERSION=$(jq -r '.version' package.json)
+          if [ "$CURRENT_VERSION" = "$CLEAN_VERSION" ]; then
+            echo "Version already matches: $CLEAN_VERSION"
+            exit 0
+          fi
+          
           jq --arg version "$CLEAN_VERSION" '.version = $version' package.json > tmp.json && mv tmp.json package.json
 
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
