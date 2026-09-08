@@ -85,7 +85,9 @@ jobs:
           prerelease: true
 
   aur:
-    if: needs.prepare.outputs.tag == 'rolling'
+    # AUR publishing uses credentials and package ownership from the upstream repository.
+    # Forks should still build and publish their Rolling release without requiring that secret.
+    if: github.repository == 'xishang0128/sparkle' && needs.prepare.outputs.tag == 'rolling'
     needs: [prepare, publish]
     uses: ./.github/workflows/aur.yml
     secrets:
