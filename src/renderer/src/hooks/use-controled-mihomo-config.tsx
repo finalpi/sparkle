@@ -1,6 +1,7 @@
 import React, { createContext, useContext, ReactNode } from 'react'
 import useSWR from 'swr'
 import { getControledMihomoConfig, patchControledMihomoConfig as patch } from '@renderer/utils/ipc'
+import { notify } from '@renderer/utils/notification'
 
 interface ControledMihomoConfigContextType {
   controledMihomoConfig: Partial<MihomoConfig> | undefined
@@ -22,7 +23,7 @@ export const ControledMihomoConfigProvider: React.FC<{ children: ReactNode }> = 
     try {
       await patch(value)
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       mutateControledMihomoConfig()
     }

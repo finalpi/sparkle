@@ -1,5 +1,6 @@
 import React, { createContext, useContext, ReactNode, useEffect } from 'react'
 import useSWR from 'swr'
+import { notify } from '@renderer/utils/notification'
 import {
   getProfileConfig,
   setProfileConfig as set,
@@ -8,7 +9,6 @@ import {
   updateProfileItem as update,
   changeCurrentProfile as change
 } from '@renderer/utils/ipc'
-import { formatError } from '@renderer/utils/error'
 
 interface ProfileConfigContextType {
   profileConfig: ProfileConfig | undefined
@@ -31,7 +31,7 @@ export const ProfileConfigProvider: React.FC<{ children: ReactNode }> = ({ child
     try {
       await set(config)
     } catch (e) {
-      alert(formatError(e))
+      notify(e, { variant: 'danger' })
     } finally {
       mutateProfileConfig()
       window.electron.ipcRenderer.send('updateTrayMenu')
@@ -42,7 +42,7 @@ export const ProfileConfigProvider: React.FC<{ children: ReactNode }> = ({ child
     try {
       await add(item)
     } catch (e) {
-      alert(formatError(e))
+      notify(e, { variant: 'danger' })
     } finally {
       mutateProfileConfig()
       window.electron.ipcRenderer.send('updateTrayMenu')
@@ -53,7 +53,7 @@ export const ProfileConfigProvider: React.FC<{ children: ReactNode }> = ({ child
     try {
       await remove(id)
     } catch (e) {
-      alert(formatError(e))
+      notify(e, { variant: 'danger' })
     } finally {
       mutateProfileConfig()
       window.electron.ipcRenderer.send('updateTrayMenu')
@@ -64,7 +64,7 @@ export const ProfileConfigProvider: React.FC<{ children: ReactNode }> = ({ child
     try {
       await update(item)
     } catch (e) {
-      alert(formatError(e))
+      notify(e, { variant: 'danger' })
     } finally {
       mutateProfileConfig()
       window.electron.ipcRenderer.send('updateTrayMenu')
@@ -75,7 +75,7 @@ export const ProfileConfigProvider: React.FC<{ children: ReactNode }> = ({ child
     try {
       await change(id)
     } catch (e) {
-      alert(formatError(e))
+      notify(e, { variant: 'danger' })
     } finally {
       mutateProfileConfig()
       window.electron.ipcRenderer.send('updateTrayMenu')

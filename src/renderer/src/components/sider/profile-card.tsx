@@ -1,7 +1,8 @@
-import { Button, Card, CardBody, CardFooter, Chip, Progress, Tooltip } from '@heroui/react'
+import { Button, Card, CardBody, CardFooter, Chip, Tooltip } from '@heroui/react'
+import { Meter } from '@heroui-v3/react'
 import { useProfileConfig } from '@renderer/hooks/use-profile-config'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { calcTraffic, calcPercent } from '@renderer/utils/calc'
+import { calcTraffic } from '@renderer/utils/calc'
 import { CgLoadbarDoc } from 'react-icons/cg'
 import { IoMdRefresh } from 'react-icons/io'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -101,11 +102,11 @@ const ProfileCard: React.FC<Props> = (props) => {
               ref={setNodeRef}
               {...attributes}
               {...listeners}
-              className="flex justify-between h-[32px]"
+              className="flex justify-between h-8"
             >
               <h3
                 title={info?.name}
-                className={`text-ellipsis whitespace-nowrap overflow-hidden text-md font-bold leading-[32px] ${match ? 'text-primary-foreground' : 'text-foreground'} `}
+                className={`text-ellipsis whitespace-nowrap overflow-hidden text-md font-bold leading-8 ${match ? 'text-primary-foreground' : 'text-foreground'} `}
               >
                 {info?.name}
               </h3>
@@ -113,7 +114,6 @@ const ProfileCard: React.FC<Props> = (props) => {
                 <Button
                   isIconOnly
                   size="sm"
-                  title="查看当前运行时配置"
                   variant="light"
                   color="default"
                   onPress={() => {
@@ -155,7 +155,7 @@ const ProfileCard: React.FC<Props> = (props) => {
                   <Button
                     size="sm"
                     variant="light"
-                    className={`h-[20px] p-1 m-0 ${match ? 'text-primary-foreground' : 'text-foreground'}`}
+                    className={`h-5 p-1 m-0 ${match ? 'text-primary-foreground' : 'text-foreground'}`}
                     onPress={async () => {
                       await patchAppConfig({ profileDisplayDate: 'update' })
                     }}
@@ -166,7 +166,7 @@ const ProfileCard: React.FC<Props> = (props) => {
                   <Button
                     size="sm"
                     variant="light"
-                    className={`h-[20px] p-1 m-0 ${match ? 'text-primary-foreground' : 'text-foreground'}`}
+                    className={`h-5 p-1 m-0 ${match ? 'text-primary-foreground' : 'text-foreground'}`}
                     onPress={async () => {
                       await patchAppConfig({ profileDisplayDate: 'expire' })
                     }}
@@ -206,11 +206,23 @@ const ProfileCard: React.FC<Props> = (props) => {
               </div>
             )}
             {extra && (
-              <Progress
-                className="w-full"
-                classNames={{ indicator: match ? 'bg-primary-foreground' : 'bg-foreground' }}
-                value={calcPercent(extra?.upload, extra?.download, extra?.total)}
-              />
+              <Meter aria-label="流量用量" maxValue={total} value={usage}>
+                <Meter.Track
+                  className={
+                    match
+                      ? 'h-2.5 bg-black/22 shadow-[inset_0_0_0_1px_rgb(255_255_255/0.35)]'
+                      : undefined
+                  }
+                >
+                  <Meter.Fill
+                    className={
+                      match
+                        ? 'bg-(--color-accent-foreground) shadow-[0_0_8px_rgb(255_255_255/0.45)]'
+                        : undefined
+                    }
+                  />
+                </Meter.Track>
+              </Meter>
             )}
           </CardFooter>
         </Card>
@@ -240,7 +252,6 @@ const ProfileCard: React.FC<Props> = (props) => {
                 className="bg-transparent"
                 variant="flat"
                 color="default"
-                title="查看当前运行时配置"
                 onPress={() => {
                   setShowRuntimeConfig(true)
                 }}

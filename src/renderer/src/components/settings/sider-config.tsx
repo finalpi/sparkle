@@ -53,10 +53,15 @@ const SiderConfig: React.FC = () => {
   }
 
   return (
-    <SettingCard title="侧边栏设置">
+    <SettingCard header="侧边栏设置">
       {Object.keys(cardStatus).map((key, index, array) => {
         return (
-          <SettingItem title={titleMap[key]} key={key} divider={index !== array.length - 1}>
+          <SettingItem
+            compatKey="legacy"
+            title={titleMap[key]}
+            key={key}
+            divider={index !== array.length - 1}
+          >
             <RadioGroup
               orientation="horizontal"
               value={cardStatus[key]}

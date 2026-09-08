@@ -1,14 +1,18 @@
-import { useRef } from 'react'
+import React, { useMemo, useRef } from 'react'
 import * as monaco from 'monaco-editor'
-import MonacoEditor, { MonacoDiffEditor } from 'react-monaco-editor'
 import { configureMonacoYaml } from 'monaco-yaml'
 import metaSchema from 'meta-json-schema/schemas/meta-json-schema.json'
 import pac from 'types-pac/pac.d.ts?raw'
 import { useTheme } from 'next-themes'
 import { nanoid } from 'nanoid'
-import React from 'react'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
+import { MonacoDiffEditor, MonacoEditor, type EditorOptions } from './monaco-editor'
+import { configureMonacoWorkers } from './monaco-workers'
 type Language = 'yaml' | 'javascript' | 'css' | 'json' | 'text'
+
+const LONG_LINE_LIMIT = 1000
+const LARGE_CONTENT_LIMIT = 2 * 1024 * 1024
+const LARGE_LINE_COUNT_LIMIT = 20000
 
 interface Props {
   value: string
@@ -20,9 +24,48 @@ interface Props {
 }
 
 let initialized = false
+
+function getContentStats(...contents: Array<string | undefined>): {
+  hasLongLine: boolean
+  isLargeContent: boolean
+} {
+  let totalLength = 0
+  let lineCount = 1
+  let currentLineLength = 0
+  let hasLongLine = false
+
+  for (const content of contents) {
+    if (!content) continue
+    totalLength += content.length
+
+    for (let index = 0; index < content.length; index++) {
+      if (content.charCodeAt(index) === 10) {
+        lineCount++
+        currentLineLength = 0
+      } else {
+        currentLineLength++
+        if (currentLineLength > LONG_LINE_LIMIT) {
+          hasLongLine = true
+        }
+      }
+    }
+  }
+
+  return {
+    hasLongLine,
+    isLargeContent: totalLength > LARGE_CONTENT_LIMIT || lineCount > LARGE_LINE_COUNT_LIMIT
+  }
+}
+
+function createEditorUri(prefix: string, language: Language): monaco.Uri {
+  const extension = language === 'yaml' ? 'clash.yaml' : language
+  return monaco.Uri.parse(`${prefix}-${nanoid()}.${extension}`)
+}
+
 const monacoInitialization = (): void => {
   if (initialized) return
 
+  configureMonacoWorkers()
   // configure yaml worker
   configureMonacoYaml(monaco, {
     validate: true,
@@ -83,7 +126,7 @@ const monacoInitialization = (): void => {
     ]
   })
   // configure PAC definition
-  monaco.languages.typescript.javascriptDefaults.addExtraLib(pac, 'pac.d.ts')
+  monaco.typescript.javascriptDefaults.addExtraLib(pac, 'pac.d.ts')
   initialized = true
 }
 
@@ -100,90 +143,86 @@ export const BaseEditor: React.FC<Props> = (props) => {
   } = props
   const { appConfig: { disableAnimation = false } = {} } = useAppConfig()
 
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor>(undefined)
-  const diffEditorRef = useRef<monaco.editor.IStandaloneDiffEditor>(undefined)
+  const { hasLongLine, isLargeContent } = useMemo(
+    () => getContentStats(value, originalValue),
+    [originalValue, value]
+  )
+  const modelLanguage = isLargeContent ? 'text' : language
+  const editorUriRef = useRef<monaco.Uri>(createEditorUri('model', modelLanguage))
+  const originalUriRef = useRef<monaco.Uri>(createEditorUri('original', modelLanguage))
 
-  const editorWillMount = (): void => {
-    monacoInitialization()
-  }
-
-  const editorDidMount = (editor: monaco.editor.IStandaloneCodeEditor): void => {
-    editorRef.current = editor
-
-    const uri = monaco.Uri.parse(`${nanoid()}.${language === 'yaml' ? 'clash' : ''}.${language}`)
-    const model = monaco.editor.createModel(value, language, uri)
-    editorRef.current.setModel(model)
-  }
-  const diffEditorDidMount = (editor: monaco.editor.IStandaloneDiffEditor): void => {
-    diffEditorRef.current = editor
-
-    const originalUri = monaco.Uri.parse(
-      `original-${nanoid()}.${language === 'yaml' ? 'clash' : ''}.${language}`
-    )
-    const modifiedUri = monaco.Uri.parse(
-      `modified-${nanoid()}.${language === 'yaml' ? 'clash' : ''}.${language}`
-    )
-    const originalModel = monaco.editor.createModel(originalValue || '', language, originalUri)
-    const modifiedModel = monaco.editor.createModel(value, language, modifiedUri)
-    diffEditorRef.current.setModel({
-      original: originalModel,
-      modified: modifiedModel
-    })
-  }
-
-  const options = {
-    tabSize: ['yaml', 'javascript', 'json'].includes(language) ? 2 : 4, // 根据语言类型设置缩进大小
-    minimap: {
-      enabled: document.documentElement.clientWidth >= 1500 // 超过一定宽度显示 minimap 滚动条
-    },
-    mouseWheelZoom: true, // 按住 Ctrl 滚轮调节缩放比例
-    readOnly: readOnly, // 只读模式
-    renderValidationDecorations: 'on' as 'off' | 'on' | 'editable', // 只读模式下显示校验信息
-    quickSuggestions: {
-      strings: true, // 字符串类型的建议
-      comments: true, // 注释类型的建议
-      other: true // 其他类型的建议
-    },
-    fontFamily: `Maple Mono NF CN,Fira Code, JetBrains Mono, Roboto Mono, "Source Code Pro", Consolas, Menlo, Monaco, monospace, "Courier New", "Apple Color Emoji", "Noto Color Emoji"`,
-    fontLigatures: true, // 连字符
-    smoothScrolling: !disableAnimation, // 禁用动画时关闭平滑滚动
-    pixelRatio: window.devicePixelRatio, // 设置像素比
-    renderSideBySide: diffRenderSideBySide, // 侧边显示
-    glyphMargin: false, // 禁用字形边距
-    folding: true, // 启用代码折叠
-    scrollBeyondLastLine: false, // 禁止滚动超过最后一行
-    automaticLayout: true, // 自动布局
-    wordWrap: 'on' as 'on' | 'off', // 自动换行 x
-    // 禁用动画时的性能优化选项
-    cursorBlinking: (disableAnimation ? 'solid' : 'blink') as 'solid' | 'blink', // 禁用光标闪烁动画
-    cursorSmoothCaretAnimation: (disableAnimation ? 'off' : 'on') as 'off' | 'on', // 禁用光标移动动画
-    scrollbar: {
-      useShadows: !disableAnimation, // 禁用滚动条阴影
-      verticalScrollbarSize: disableAnimation ? 10 : 14, // 减小滚动条尺寸
-      horizontalScrollbarSize: disableAnimation ? 10 : 14
-    },
-    suggest: {
-      insertMode: (disableAnimation ? 'replace' : 'insert') as 'replace' | 'insert', // 简化建议插入模式
-      showIcons: !disableAnimation // 禁用建议图标以减少渲染
-    },
-    hover: {
-      enabled: !disableAnimation, // 禁用悬停提示
-      delay: disableAnimation ? 0 : 300
-    }
-  }
+  const options = useMemo<EditorOptions>(
+    () => ({
+      tabSize: ['yaml', 'javascript', 'json'].includes(language) ? 2 : 4, // 根据语言类型设置缩进大小
+      minimap: {
+        enabled: !isLargeContent && document.documentElement.clientWidth >= 1500 // 超过一定宽度显示 minimap 滚动条
+      },
+      mouseWheelZoom: true, // 按住 Ctrl 滚轮调节缩放比例
+      readOnly: readOnly, // 只读模式
+      largeFileOptimizations: true,
+      renderValidationDecorations: isLargeContent ? 'off' : 'on', // 只读模式下显示校验信息
+      quickSuggestions: isLargeContent
+        ? false
+        : {
+            strings: true, // 字符串类型的建议
+            comments: true, // 注释类型的建议
+            other: true // 其他类型的建议
+          },
+      suggestOnTriggerCharacters: !isLargeContent,
+      acceptSuggestionOnCommitCharacter: !isLargeContent,
+      selectionHighlight: !isLargeContent,
+      occurrencesHighlight: isLargeContent ? 'off' : 'singleFile',
+      codeLens: !isLargeContent,
+      colorDecorators: !isLargeContent,
+      links: !isLargeContent,
+      matchBrackets: isLargeContent ? 'never' : 'always',
+      fontFamily: `Maple Mono NF CN,Fira Code, JetBrains Mono, Roboto Mono, "Source Code Pro", Consolas, Menlo, Monaco, monospace, "Courier New", "Apple Color Emoji", "Noto Color Emoji"`,
+      fontLigatures: true, // 连字符
+      smoothScrolling: !disableAnimation, // 禁用动画时关闭平滑滚动
+      pixelRatio: window.devicePixelRatio, // 设置像素比
+      renderSideBySide: diffRenderSideBySide, // 侧边显示
+      useInlineViewWhenSpaceIsLimited: false, // 侧边显示时不要自动退回内联模式
+      glyphMargin: false, // 禁用字形边距
+      folding: !isLargeContent, // 启用代码折叠
+      scrollBeyondLastLine: false, // 禁止滚动超过最后一行
+      automaticLayout: true, // 自动布局
+      wordWrap: hasLongLine ? 'off' : 'on', // 超长行时关闭自动换行
+      wordWrapOverride1: hasLongLine ? 'off' : 'inherit',
+      wordWrapOverride2: hasLongLine ? 'off' : 'inherit',
+      wrappingStrategy: hasLongLine ? 'simple' : 'advanced',
+      stopRenderingLineAfter: hasLongLine ? 5000 : 10000,
+      // 禁用动画时的性能优化选项
+      cursorBlinking: disableAnimation ? 'solid' : 'blink', // 禁用光标闪烁动画
+      cursorSmoothCaretAnimation: disableAnimation ? 'off' : 'on', // 禁用光标移动动画
+      scrollbar: {
+        useShadows: !disableAnimation, // 禁用滚动条阴影
+        verticalScrollbarSize: disableAnimation ? 10 : 14, // 减小滚动条尺寸
+        horizontalScrollbarSize: disableAnimation ? 10 : 14
+      },
+      suggest: {
+        insertMode: disableAnimation ? 'replace' : 'insert', // 简化建议插入模式
+        showIcons: !disableAnimation // 禁用建议图标以减少渲染
+      },
+      hover: {
+        enabled: !disableAnimation && !isLargeContent ? 'on' : 'off', // 禁用悬停提示
+        delay: disableAnimation ? 0 : 300
+      }
+    }),
+    [diffRenderSideBySide, disableAnimation, hasLongLine, isLargeContent, language, readOnly]
+  )
+  const editorTheme = trueTheme?.includes('light') ? 'vs' : 'vs-dark'
 
   if (originalValue !== undefined) {
     return (
       <MonacoDiffEditor
-        language={language}
-        original={originalValue}
+        language={modelLanguage}
+        originalValue={originalValue}
         value={value}
-        height="100%"
-        theme={trueTheme?.includes('light') ? 'vs' : 'vs-dark'}
+        originalUri={originalUriRef.current}
+        uri={editorUriRef.current}
+        theme={editorTheme}
         options={options}
-        editorWillMount={editorWillMount}
-        editorDidMount={diffEditorDidMount}
-        editorWillUnmount={(): void => {}}
+        initialize={monacoInitialization}
         onChange={onChange}
       />
     )
@@ -191,14 +230,12 @@ export const BaseEditor: React.FC<Props> = (props) => {
 
   return (
     <MonacoEditor
-      language={language}
+      language={modelLanguage}
       value={value}
-      height="100%"
-      theme={trueTheme?.includes('light') ? 'vs' : 'vs-dark'}
+      uri={editorUriRef.current}
+      theme={editorTheme}
       options={options}
-      editorWillMount={editorWillMount}
-      editorDidMount={editorDidMount}
-      editorWillUnmount={(): void => {}}
+      initialize={monacoInitialization}
       onChange={onChange}
     />
   )

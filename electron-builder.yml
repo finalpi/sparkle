@@ -35,7 +35,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   oneClick: false
   perMachine: true
-  createDesktopShortcut: true
+  createDesktopShortcut: false
+  include: build/installer.nsh
 mac:
   target:
     - pkg
@@ -66,11 +67,55 @@ linux:
   category: Utility
   artifactName: ${name}-linux-${version}-${arch}.${ext}
 deb:
+  fpm:
+    - --before-install=build/linux/preinst
   afterInstall: 'build/linux/postinst'
+  depends:
+    - libasound2
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0
+  recommends:
+    - libappindicator3-1
 rpm:
+  fpm:
+    - --before-install=build/linux/preinst
   afterInstall: 'build/linux/postinst'
+  depends:
+    - alsa-lib
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - libXtst
+    - xdg-utils
+    - at-spi2-core
+    - libuuid
+    - libsecret
 pacman:
   afterInstall: 'build/linux/postinst'
-  artifactName: ${name}-linux-${version}-${arch}.pkg.tar.xz
+  fpm:
+    - --before-install=build/linux/preinst
+    - --pacman-compression
+    - zstd
+    - build/linux/sparkle.sh=/usr/bin/sparkle
+  depends:
+    - alsa-lib
+    - gtk3
+    - libnotify
+    - nss
+    - libxss
+    - libxtst
+    - xdg-utils
+    - at-spi2-core
+    - util-linux-libs
+    - libsecret
+  artifactName: ${name}-linux-${version}-${arch}.pkg.tar.zst
 npmRebuild: true
 publish: []

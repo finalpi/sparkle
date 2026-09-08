@@ -1,13 +1,15 @@
 #!/bin/bash
 
-if type update-alternatives 2>/dev/null >&1; then
-    # Remove previous link if it doesn't use update-alternatives
-    if [ -L '/usr/bin/sparkle' -a -e '/usr/bin/sparkle' -a "`readlink '/usr/bin/sparkle'`" != '/etc/alternatives/sparkle' ]; then
-        rm -f '/usr/bin/sparkle'
+if [ ! -f '/usr/bin/sparkle' ] || [ -L '/usr/bin/sparkle' ]; then
+    if type update-alternatives 2>/dev/null >&1; then
+        # Remove previous link if it doesn't use update-alternatives
+        if [ -L '/usr/bin/sparkle' -a -e '/usr/bin/sparkle' -a "`readlink '/usr/bin/sparkle'`" != '/etc/alternatives/sparkle' ]; then
+            rm -f '/usr/bin/sparkle'
+        fi
+        update-alternatives --install '/usr/bin/sparkle' 'sparkle' '/opt/sparkle/sparkle' 100 || ln -sf '/opt/sparkle/sparkle' '/usr/bin/sparkle'
+    else
+        ln -sf '/opt/sparkle/sparkle' '/usr/bin/sparkle'
     fi
-    update-alternatives --install '/usr/bin/sparkle' 'sparkle' '/opt/sparkle/sparkle' 100 || ln -sf '/opt/sparkle/sparkle' '/usr/bin/sparkle'
-else
-    ln -sf '/opt/sparkle/sparkle' '/usr/bin/sparkle'
 fi
 
 sed -i 's/Name=sparkle/Name=Sparkle/' '/usr/share/applications/sparkle.desktop'
@@ -19,6 +21,26 @@ chmod +sx /opt/sparkle/resources/sidecar/mihomo-alpha
 if [ -d '/opt/sparkle/resources/files/sub-store-frontend' ]; then
     chmod -R go-w '/opt/sparkle/resources/files/sub-store-frontend' 2>/dev/null || true
 fi
+
+restore_sparkle_service_if_was_running() {
+    SERVICE_NAME='SparkleService'
+    STATE_FILE='/run/sparkle/service-was-running'
+
+    if [ ! -f "$STATE_FILE" ]; then
+        return
+    fi
+    rm -f "$STATE_FILE" 2>/dev/null || true
+
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl start "$SERVICE_NAME" >/dev/null 2>&1 || true
+    elif command -v service >/dev/null 2>&1; then
+        service "$SERVICE_NAME" start >/dev/null 2>&1 || true
+    elif [ -x "/etc/init.d/$SERVICE_NAME" ]; then
+        "/etc/init.d/$SERVICE_NAME" start >/dev/null 2>&1 || true
+    fi
+}
+
+restore_sparkle_service_if_was_running
 
 if hash update-mime-database 2>/dev/null; then
     update-mime-database /usr/share/mime || true

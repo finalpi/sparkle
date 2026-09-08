@@ -35,7 +35,6 @@ const Settings: React.FC = () => {
             size="sm"
             variant="light"
             className="app-nodrag"
-            title="GitHub 仓库"
             onPress={() => {
               window.open('https://github.com/finalpi/sparkle')
             }}
@@ -47,7 +46,6 @@ const Settings: React.FC = () => {
             size="sm"
             variant="light"
             className="app-nodrag"
-            title="Telegram 频道"
             onPress={() => {
               window.open('https://t.me/atri0828')
             }}

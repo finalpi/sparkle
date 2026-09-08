@@ -3,12 +3,9 @@
 <h3 align="center">Another <a href="https://github.com/MetaCubeX/mihomo">Mihomo</a> GUI</h3>
 
 <p align="center">
-  <a href="https://github.com/finalpi/sparkle/releases">
-    <img src="https://img.shields.io/github/release/finalpi/sparkle/all.svg">
-  </a>
-  <a href="https://t.me/+y7rcYjEKIiI1NzZl">
-    <img src="https://img.shields.io/badge/Telegram-Group-blue?logo=telegram">
-  </a>
+  <a href="https://github.com/finalpi/sparkle/releases/latest"><img src="https://img.shields.io/github/v/release/finalpi/sparkle?label=latest"></a>
+  <a href="https://github.com/finalpi/sparkle/releases/tag/rolling"><img src="https://img.shields.io/badge/-rolling-orange"></a>
+  <a href="https://t.me/+y7rcYjEKIiI1NzZl"><img src="https://img.shields.io/badge/Telegram-Group-blue?logo=telegram"></a>
 </p>
 
 ## 特性
@@ -20,8 +17,6 @@
 - [x] 通过 WebDAV 一键备份和恢复配置
 - [x] 强大的覆写功能，任意修订配置文件
 - [x] 深度集成 Sub-Store，轻松管理订阅
-- [x] 优化订阅更新逻辑，按照时间周期更新，指定每周的某个时间点更新
-- [x] 规则标签卡支持自定义前置和后置规则
 
 ## 开发
 
@@ -165,6 +160,20 @@ pnpm build:mac
 pnpm build:linux
 ```
 
+**Linux 系统内核构建：**
+
+```bash
+export SPARKLE_SYSTEM_CORE=1
+# 可选：默认值为 /usr/bin/sparkle-service
+export SPARKLE_SYSTEM_SERVICE=/usr/bin/sparkle-service
+pnpm install
+pnpm build:linux
+```
+
+`SPARKLE_SYSTEM_CORE=1` 默认使用 `/usr/bin/mihomo`，也可指定绝对路径；服务默认使用 `/usr/bin/sparkle-service`。
+
+此模式不下载或打包外部资源，也不引用项目的 pre/postinstall（electron-builder 默认脚本除外）。资源由发行版拆分包提供；服务仅保留连接和初始化，生命周期交由 init 系统管理。
+
 **指定架构：**
 
 ```bash
@@ -193,7 +202,7 @@ pnpm build:linux deb --x64
 
 - **Windows**: `.exe` 安装包和 `.7z` 便携版
 - **macOS**: `.pkg` 安装包
-- **Linux**: `.deb`、`.rpm`、`.pkg.tar.xz(pacman)` 等格式
+- **Linux**: `.deb`、`.rpm`、`.pkg.tar.zst(pacman)` 等格式
 
 ### 常见问题
 
@@ -242,10 +251,10 @@ node --version
 
 ## Star History
 
-<a href="https://www.star-history.com/#finalpi/sparkle&Date">
+<a href="https://www.star-history.com/?repos=finalpi/sparkle&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=finalpi/sparkle&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=finalpi/sparkle&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=finalpi/sparkle&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=finalpi/sparkle&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=finalpi/sparkle&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=finalpi/sparkle&type=date&legend=top-left" />
  </picture>
 </a>

@@ -1,7 +1,42 @@
 @import 'tailwindcss';
 @plugin './hero.mjs';
+@import '@heroui-v3/styles';
+@import './main-compatible.css';
 @source '../../../../node_modules/@heroui/theme/dist/**/*.{js,ts,jsx,tsx}';
 @custom-variant dark (&:is(.dark *));
+
+@keyframes proxy-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes proxy-tooltip-in-right {
+  from {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes proxy-tooltip-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(6px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
 
 @font-face {
   font-family: 'twemoji';
@@ -68,6 +103,36 @@
 }
 .app-drag {
   -webkit-app-region: drag;
+}
+
+.touch-sortable-card {
+  touch-action: pan-y;
+}
+
+.sysproxy-card,
+.tun-card,
+.dns-card,
+.sniff-card,
+.proxy-card,
+.conn-card,
+.profile-card,
+.mihomo-core-card,
+.rule-card,
+.resource-card,
+.override-card,
+.log-card,
+.substore-card {
+  touch-action: pan-y;
+}
+
+.app-drag > .header {
+  width: auto;
+  padding: 0;
+  text-align: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
 }
 
 * {

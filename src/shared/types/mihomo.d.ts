@@ -33,7 +33,7 @@ interface MihomoConfig {
   port?: number
   proxies?: []
   'proxy-groups'?: []
-  rules?: []
+  rules?: string[]
   hosts?: { [key: string]: string | string[] }
   'geodata-mode'?: boolean
   'geo-auto-update'?: boolean
@@ -106,6 +106,7 @@ interface MihomoDNSConfig {
   'direct-nameserver'?: string[]
   'direct-nameserver-follow-policy'?: boolean
   'nameserver-policy'?: { [key: string]: string | string[] }
+  'proxy-server-nameserver-policy'?: { [key: string]: string | string[] }
   'cache-algorithm'?: string
 }
 
@@ -140,4 +141,5 @@ interface MihomoProfileConfig {
 interface ProxyProviderConfig {
   path?: string
   url?: string
+  'age-secret-key'?: string
 }

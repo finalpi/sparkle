@@ -1,5 +1,6 @@
 import React, { createContext, useContext, ReactNode, useEffect } from 'react'
 import useSWR from 'swr'
+import { notify } from '@renderer/utils/notification'
 import {
   getOverrideConfig,
   setOverrideConfig as set,
@@ -28,7 +29,7 @@ export const OverrideConfigProvider: React.FC<{ children: ReactNode }> = ({ chil
     try {
       await set(config)
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       mutateOverrideConfig()
     }
@@ -38,7 +39,7 @@ export const OverrideConfigProvider: React.FC<{ children: ReactNode }> = ({ chil
     try {
       await add(item)
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       mutateOverrideConfig()
     }
@@ -48,7 +49,7 @@ export const OverrideConfigProvider: React.FC<{ children: ReactNode }> = ({ chil
     try {
       await remove(id)
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       mutateOverrideConfig()
     }
@@ -58,7 +59,7 @@ export const OverrideConfigProvider: React.FC<{ children: ReactNode }> = ({ chil
     try {
       await update(item)
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       mutateOverrideConfig()
     }

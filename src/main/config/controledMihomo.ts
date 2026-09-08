@@ -10,8 +10,16 @@ let controledMihomoConfig: Partial<MihomoConfig> // mihomo.yaml
 
 export async function getControledMihomoConfig(force = false): Promise<Partial<MihomoConfig>> {
   if (force || !controledMihomoConfig) {
-    const data = await readFile(controledMihomoConfigPath(), 'utf-8')
-    controledMihomoConfig = parseYaml<Partial<MihomoConfig>>(data) || defaultControledMihomoConfig
+    try {
+      const data = await readFile(controledMihomoConfigPath(), 'utf-8')
+      controledMihomoConfig = parseYaml<Partial<MihomoConfig>>(data) || defaultControledMihomoConfig
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error
+      }
+      controledMihomoConfig = defaultControledMihomoConfig
+      await writeFile(controledMihomoConfigPath(), stringifyYaml(controledMihomoConfig), 'utf-8')
+    }
   }
   if (typeof controledMihomoConfig !== 'object')
     controledMihomoConfig = defaultControledMihomoConfig
@@ -41,6 +49,11 @@ export async function patchControledMihomoConfig(patch: Partial<MihomoConfig>): 
   if (patch.dns?.['nameserver-policy']) {
     controledMihomoConfig.dns = controledMihomoConfig.dns || {}
     controledMihomoConfig.dns['nameserver-policy'] = patch.dns['nameserver-policy']
+  }
+  if (patch.dns?.['proxy-server-nameserver-policy']) {
+    controledMihomoConfig.dns = controledMihomoConfig.dns || {}
+    controledMihomoConfig.dns['proxy-server-nameserver-policy'] =
+      patch.dns['proxy-server-nameserver-policy']
   }
   if (patch.dns?.['use-hosts']) {
     controledMihomoConfig.hosts = patch.hosts

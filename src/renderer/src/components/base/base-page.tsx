@@ -14,7 +14,7 @@ let saveOnTop = false
 
 const BasePage = forwardRef<HTMLDivElement, Props>((props, ref) => {
   const { appConfig } = useAppConfig()
-  const { useWindowFrame = false } = appConfig || {}
+  const { useWindowFrame = false, disableAnimation = false } = appConfig || {}
   const [overlayWidth, setOverlayWidth] = React.useState(0)
   const [onTop, setOnTop] = useState(saveOnTop)
 
@@ -42,16 +42,22 @@ const BasePage = forwardRef<HTMLDivElement, Props>((props, ref) => {
 
   return (
     <div ref={contentRef} className="w-full h-full">
-      <div className="sticky top-0 z-40 h-[49px] w-full bg-background">
-        <div className="app-drag p-2 flex justify-between h-[48px]">
-          <div className="title h-full text-lg leading-[32px]">{props.title}</div>
-          <div style={{ marginRight: overlayWidth }} className="header flex gap-1 h-full">
+      <div
+        className={`sticky top-0 h-12.25 w-full ${disableAnimation ? 'bg-background/95 backdrop-blur-sm' : 'bg-transparent backdrop-blur'}`}
+      >
+        <div className="app-drag p-2 flex justify-between h-12 items-center">
+          <div className="title h-full text-lg leading-8">{props.title}</div>
+          <div
+            style={{ marginRight: overlayWidth }}
+            className="header flex gap-1 h-full items-center"
+          >
             {props.header}
             <Button
+              data-react-aria-top-layer="true"
+              style={{ zIndex: 60 }}
               size="sm"
-              className="app-nodrag"
+              className="app-nodrag relative"
               isIconOnly
-              title="窗口置顶"
               variant="light"
               color={onTop ? 'primary' : 'default'}
               onPress={async () => {
@@ -71,7 +77,9 @@ const BasePage = forwardRef<HTMLDivElement, Props>((props, ref) => {
 
         <Divider />
       </div>
-      <div className="content h-[calc(100vh-49px)] overflow-y-auto custom-scrollbar">
+      <div
+        className={`content h-[calc(100vh-49px)] overflow-y-auto custom-scrollbar ${props.contentClassName ?? ''}`}
+      >
         {props.children}
       </div>
     </div>

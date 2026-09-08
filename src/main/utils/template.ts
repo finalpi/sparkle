@@ -1,22 +1,39 @@
 import os from 'os'
+import { systemCoreDefaultPath, systemCoreOnlyBuild } from '../../shared/build-flags'
 
 export const defaultConfig: AppConfig = {
-  core: 'mihomo',
+  core: systemCoreOnlyBuild ? 'system' : 'mihomo',
+  ...(systemCoreOnlyBuild ? { systemCorePath: systemCoreDefaultPath } : {}),
+  ...(systemCoreOnlyBuild ? { corePermissionMode: 'elevated' as const } : {}),
   updateChannel: 'stable',
+  notificationMode: 'system',
+  showUpdateButtonAfterNotification: true,
   silentStart: false,
   appTheme: 'system',
   useWindowFrame: false,
+  enableWindowDrag: false,
   proxyInTray: true,
+  customTrayIcon: '',
+  trayProxyDelayLayout: 'new-line',
   useCustomTrayMenu: false,
+  saveLogs: true,
   maxLogDays: 7,
+  maxLogFileSizeMB: 20,
+  maxLogEntries: 500,
   proxyCols: 'auto',
   connectionDirection: 'asc',
   connectionOrderBy: 'time',
+  connectionGroupByProcess: false,
+  connectionGroupSort: 'name',
+  connectionGroupDirection: 'asc',
   connectionInterval: 500,
+  gistSyncEnabled: false,
+  gistEncrypted: false,
   useSubStore: true,
   proxyDisplayOrder: 'default',
   autoCheckUpdate: false,
   autoCloseConnection: true,
+  closeMode: 'all',
   controlDns: true,
   controlSniff: true,
   hosts: [],
@@ -36,7 +53,7 @@ export const defaultConfig: AppConfig = {
     'substore'
   ],
   siderWidth: 250,
-  sysProxy: { enable: false, mode: 'manual' },
+  sysProxy: { enable: false, mode: 'manual', guard: false, guardNotify: false },
   disableLoopbackDetector: false,
   disableEmbedCA: false,
   disableSystemCA: false,
@@ -45,7 +62,14 @@ export const defaultConfig: AppConfig = {
   disableGPU: process.platform === 'win32' && parseInt(os.release().split('.')[2], 10) <= 20000,
   proxyDisplayLayout: 'double',
   groupDisplayLayout: 'double',
-  autoLightweightMode: 'core'
+  showGroupSelectedProxy: false,
+  autoLightweightMode: 'core',
+  coreStartupMode: 'post-up',
+  serviceRunMode: 'auto',
+  delayTestConcurrency: 50,
+  delayTestUseGroupApi: false,
+  delayTestUrlScope: 'group',
+  showProxyDetailTooltip: false
 }
 
 export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
@@ -74,7 +98,6 @@ export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
   'keep-alive-idle': 0,
   'keep-alive-interval': 0,
   'disable-keep-alive': false,
-  'global-client-fingerprint': '',
   'lan-allowed-ips': ['0.0.0.0/0', '::/0'],
   'lan-disallowed-ips': [],
   authentication: [],
@@ -101,7 +124,9 @@ export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
     'use-system-hosts': false,
     'default-nameserver': ['tls://223.5.5.5'],
     nameserver: ['https://doh.pub/dns-query', 'https://dns.alidns.com/dns-query'],
+    'nameserver-policy': {},
     'proxy-server-nameserver': [],
+    'proxy-server-nameserver-policy': {},
     'direct-nameserver': []
   },
   sniffer: {
@@ -142,7 +167,7 @@ export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
   'geo-update-interval': 24,
   'geodata-mode': false,
   'geox-url': {
-    geoip: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat',
+    geoip: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.dat',
     geosite: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat',
     mmdb: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip.metadb',
     asn: 'https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb'

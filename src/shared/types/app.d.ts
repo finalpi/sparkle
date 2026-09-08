@@ -1,6 +1,19 @@
 interface AppVersion {
   version: string
+  tag?: string
   changelog: string
+}
+
+type AppUpdateChannel = 'stable' | 'rolling'
+type AppNotificationMode = 'system' | 'toast'
+type AppNotificationVariant = 'default' | 'accent' | 'success' | 'warning' | 'danger'
+
+interface AppNotificationPayload {
+  title: string
+  body?: string
+  persistent?: boolean
+  url?: string
+  variant?: AppNotificationVariant
 }
 
 interface ISysProxyConfig {
@@ -10,6 +23,8 @@ interface ISysProxyConfig {
   bypass?: string[]
   pacScript?: string
   settingMode?: 'exec' | 'service'
+  guard?: boolean
+  guardNotify?: boolean
 }
 
 interface IHost {
@@ -18,10 +33,13 @@ interface IHost {
 }
 
 interface AppConfig {
-  updateChannel: 'stable' | 'beta'
+  updateChannel: AppUpdateChannel
+  notificationMode?: AppNotificationMode
+  showUpdateButtonAfterNotification?: boolean
   core: 'mihomo' | 'mihomo-alpha' | 'system'
   systemCorePath?: string
   corePermissionMode?: 'elevated' | 'service'
+  serviceRunMode?: 'auto' | 'sandbox' | 'direct'
   serviceAuthKey?: string
   disableLoopbackDetector: boolean
   disableEmbedCA: boolean
@@ -31,11 +49,16 @@ interface AppConfig {
   proxyDisplayOrder: 'default' | 'delay' | 'name'
   proxyDisplayLayout: 'hidden' | 'single' | 'double'
   groupDisplayLayout: 'hidden' | 'single' | 'double'
+  showGroupSelectedProxy: boolean
+  showProxyDetailTooltip: boolean
   profileDisplayDate?: 'expire' | 'update'
-  envType?: ('bash' | 'cmd' | 'powershell' | 'nushell')[]
+  envType?: ('bash' | 'fish' | 'cmd' | 'powershell' | 'nushell')[]
   proxyCols: 'auto' | '1' | '2' | '3' | '4'
   connectionDirection: 'asc' | 'desc'
   connectionOrderBy: 'time' | 'upload' | 'download' | 'uploadSpeed' | 'downloadSpeed' | 'process'
+  connectionGroupByProcess?: boolean
+  connectionGroupSort?: 'name' | 'count' | 'upload' | 'download' | 'uploadSpeed' | 'downloadSpeed'
+  connectionGroupDirection?: 'asc' | 'desc'
   connectionInterval?: number
   spinFloatingIcon?: boolean
   disableTray?: boolean
@@ -55,6 +78,10 @@ interface AppConfig {
   sysproxyCardStatus?: CardStatus
   tunCardStatus?: CardStatus
   githubToken?: string
+  gistSyncEnabled?: boolean
+  gistEncrypted?: boolean
+  gistAgeRecipient?: string
+  gistAgeIdentity?: string
   useSubStore: boolean
   subStoreHost?: string
   subStoreBackendSyncCron?: string
@@ -63,6 +90,7 @@ interface AppConfig {
   autoLightweight?: boolean
   autoLightweightDelay?: number
   autoLightweightMode?: 'core' | 'tray'
+  coreStartupMode?: 'post-up' | 'log'
   useCustomSubStore?: boolean
   useProxyInSubStore?: boolean
   mihomoCpuPriority?: Priority
@@ -71,7 +99,9 @@ interface AppConfig {
   autoSetDNSMode?: 'none' | 'exec' | 'service'
   originDNS?: string
   useWindowFrame: boolean
+  enableWindowDrag: boolean
   proxyInTray: boolean
+  trayProxyDelayLayout?: 'same-line' | 'new-line'
   siderOrder: string[]
   siderWidth: number
   appTheme: AppTheme
@@ -79,17 +109,26 @@ interface AppConfig {
   autoCheckUpdate: boolean
   silentStart: boolean
   autoCloseConnection: boolean
+  closeMode: 'all' | 'group'
   sysProxy: ISysProxyConfig
+  saveLogs?: boolean
   maxLogDays: number
+  maxLogFileSizeMB?: number
+  maxLogEntries?: number
+  realtimeLogLevel?: LogLevel
   userAgent?: string
   delayTestConcurrency?: number
+  delayTestUseGroupApi?: boolean
   delayTestUrl?: string
+  delayTestUrlScope?: 'group' | 'global'
   delayTestTimeout?: number
   encryptedPassword?: number[]
+  rememberProxyGroupOpenState?: boolean
   controlDns?: boolean
   controlSniff?: boolean
   useDockIcon?: boolean
   showTraffic?: boolean
+  customTrayIcon?: string
   useCustomTrayMenu?: boolean
   webdavUrl?: string
   webdavDir?: string
@@ -136,6 +175,8 @@ interface ProfileItem {
   updated?: number
   override?: string[]
   useProxy?: boolean
+  ageRecipient?: string
+  ageIdentity?: string
   extra?: SubscriptionUserInfo
   substore?: boolean
   locked?: boolean

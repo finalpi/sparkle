@@ -1,0 +1,15 @@
+allowBuilds:
+  '@heroui/shared-utils': true
+  electron: true
+  electron-winstaller: true
+  '@loongdotjs/electron-winstaller': true
+  esbuild: true
+  meta-json-schema: true
+overrides:
+  typescript-eslint: ^8.59.2
+patchedDependencies:
+  monaco-worker-manager@2.0.1: patches/monaco-worker-manager@2.0.1.patch
+publicHoistPattern:
+  - '*@heroui/*'
+shamefullyHoist: true
+virtualStoreDirMaxLength: 80

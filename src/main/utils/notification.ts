@@ -1,0 +1,160 @@
+import { BrowserWindow, Notification, clipboard, dialog, ipcMain, shell } from 'electron'
+import { getAppConfig } from '../config/app'
+
+export type AppNotificationVariant = 'default' | 'accent' | 'success' | 'warning' | 'danger'
+type AppNotificationMode = 'system' | 'toast'
+
+export interface AppNotificationPayload {
+  id?: string
+  title: string
+  body?: string
+  persistent?: boolean
+  url?: string
+  variant?: AppNotificationVariant
+}
+
+const pendingToastNotifications: AppNotificationPayload[] = []
+const systemNotifications = new Map<string, Notification>()
+
+ipcMain.on('app-notification-ready', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (!window || !isMainRendererWindow(window)) {
+    return
+  }
+
+  flushPendingToastNotifications(window)
+})
+
+ipcMain.on('app-notification-detail', (event, title: string, body: string) => {
+  const window = BrowserWindow.fromWebContents(event.sender)
+  if (window && isMainRendererWindow(window)) showNotificationDetail(title, body)
+})
+
+export async function showNotification(payload: AppNotificationPayload): Promise<void> {
+  const notification = normalizeNotificationPayload(payload)
+  let notificationMode: AppNotificationMode = 'system'
+  try {
+    notificationMode = (await getAppConfig()).notificationMode ?? 'system'
+  } catch {
+    // fall back to system notifications when config is not readable yet
+  }
+
+  if (notificationMode === 'toast') {
+    const window = getVisibleMainRendererWindow()
+    if (window) {
+      window.webContents.send('app-notification', notification)
+      return
+    }
+
+    pendingToastNotifications.push(notification)
+    return
+  }
+
+  const hasErrorDetail = notification.variant === 'danger' && Boolean(notification.body)
+  const systemNotification = new Notification({
+    title: notification.title,
+    body: notification.body,
+    timeoutType: notification.persistent ? 'never' : 'default',
+    actions: hasErrorDetail ? [{ type: 'button', text: '查看详情' }] : undefined
+  })
+  if (hasErrorDetail) {
+    const showDetail = (): void => {
+      showNotificationDetail(notification.title, notification.body!)
+    }
+    systemNotification.on('action', showDetail)
+    systemNotification.on('click', showDetail)
+  } else if (notification.url) {
+    systemNotification.on('click', () => {
+      void shell.openExternal(notification.url!)
+    })
+  }
+  if (notification.id) {
+    systemNotifications.get(notification.id)?.close()
+    systemNotifications.set(notification.id, systemNotification)
+    systemNotification.on('close', () => {
+      if (systemNotifications.get(notification.id!) === systemNotification) {
+        systemNotifications.delete(notification.id!)
+      }
+    })
+  }
+  systemNotification.show()
+}
+
+export function dismissNotification(id: string): void {
+  const notification = systemNotifications.get(id)
+  if (notification) {
+    notification.close()
+    systemNotifications.delete(id)
+  }
+
+  for (let index = pendingToastNotifications.length - 1; index >= 0; index--) {
+    if (pendingToastNotifications[index].id === id) {
+      pendingToastNotifications.splice(index, 1)
+    }
+  }
+
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed() && isMainRendererWindow(window)) {
+      window.webContents.send('app-notification-dismiss', id)
+    }
+  }
+}
+
+function getVisibleMainRendererWindow(): BrowserWindow | undefined {
+  return BrowserWindow.getAllWindows().find(
+    (window) =>
+      !window.isDestroyed() &&
+      window.isVisible() &&
+      !window.isMinimized() &&
+      isMainRendererWindow(window)
+  )
+}
+
+function flushPendingToastNotifications(window: BrowserWindow): void {
+  if (pendingToastNotifications.length === 0) {
+    return
+  }
+
+  const notifications = pendingToastNotifications.splice(0)
+  for (const notification of notifications) {
+    window.webContents.send('app-notification', notification)
+  }
+}
+
+function isMainRendererWindow(window: BrowserWindow): boolean {
+  const url = window.webContents.getURL()
+  return !url.includes('floating.html') && !url.includes('traymenu.html')
+}
+
+function showNotificationDetail(title: string, body: string): void {
+  void dialog
+    .showMessageBox({
+      type: 'error',
+      title: '错误详情',
+      message: title,
+      detail: body,
+      buttons: ['关闭', '复制'],
+      noLink: true
+    })
+    .then(({ response }) => {
+      if (response === 1) clipboard.writeText(body)
+    })
+}
+
+function normalizeNotificationPayload(payload: AppNotificationPayload): AppNotificationPayload {
+  return {
+    ...payload,
+    id: payload.id ? formatNotificationText(payload.id) : undefined,
+    title: formatNotificationText(payload.title),
+    body: payload.body ? formatNotificationText(payload.body) : undefined,
+    persistent: payload.persistent,
+    url: payload.url ? formatNotificationText(payload.url) : undefined
+  }
+}
+
+function formatNotificationText(value: unknown): string {
+  let text = value instanceof Error ? value.message : String(value)
+  text = text.replace(/\\r\\n|\\n|\\r/g, '\n').replace(/\r\n|\r/g, '\n')
+  text = text.replace(/^Error:\s*/i, '')
+  return text.trim()
+}

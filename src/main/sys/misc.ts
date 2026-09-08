@@ -1,8 +1,9 @@
-import { exec, execFile, execSync, spawn } from 'child_process'
-import { app, dialog, nativeTheme, shell } from 'electron'
+import { execFile, execSync, spawn } from 'child_process'
+import { app, dialog, nativeImage, nativeTheme, shell } from 'electron'
 import { readFile } from 'fs/promises'
 import path from 'path'
 import { promisify } from 'util'
+import { setupFirewallRules } from '@uruhalushia/sparkle-native'
 import {
   dataDir,
   exePath,
@@ -14,17 +15,36 @@ import {
   taskDir
 } from '../utils/dirs'
 import { copyFileSync, writeFileSync } from 'fs'
+import { execWithElevation } from '../utils/elevation'
 
-export function getFilePath(ext: string[]): string[] | undefined {
+export function getFilePath(
+  ext: string[],
+  title = '选择订阅文件',
+  filterName = `${ext} file`
+): string[] | undefined {
   return dialog.showOpenDialogSync({
-    title: '选择订阅文件',
-    filters: [{ name: `${ext} file`, extensions: ext }],
+    title,
+    filters: [{ name: filterName, extensions: ext }],
     properties: ['openFile']
   })
 }
 
 export async function readTextFile(filePath: string): Promise<string> {
   return await readFile(filePath, 'utf8')
+}
+
+export async function readImageFileDataURL(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase()
+  if (ext === '.ico' || ext === '.icns') {
+    const image = nativeImage.createFromPath(filePath)
+    if (image.isEmpty()) throw new Error('Failed to load image')
+    return image.toDataURL()
+  }
+  const mimeType =
+    ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.webp' ? 'image/webp' : 'image/png'
+  const data = await readFile(filePath)
+
+  return `data:${mimeType};base64,${data.toString('base64')}`
 }
 
 export function openFile(type: 'profile' | 'override', id: string, ext?: 'yaml' | 'js'): void {
@@ -43,24 +63,12 @@ export async function openUWPTool(): Promise<void> {
 }
 
 export async function setupFirewall(): Promise<void> {
-  const execPromise = promisify(exec)
-  const removeCommand = `
-  $rules = @("mihomo", "mihomo-alpha", "Sparkle")
-  foreach ($rule in $rules) {
-    if (Get-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue) {
-      Remove-NetFirewallRule -DisplayName $rule -ErrorAction SilentlyContinue
-    }
-  }
-  `
-  const createCommand = `
-  New-NetFirewallRule -DisplayName "mihomo" -Direction Inbound -Action Allow -Program "${mihomoCorePath('mihomo')}" -Enabled True -Profile Any -ErrorAction SilentlyContinue
-  New-NetFirewallRule -DisplayName "mihomo-alpha" -Direction Inbound -Action Allow -Program "${mihomoCorePath('mihomo-alpha')}" -Enabled True -Profile Any -ErrorAction SilentlyContinue
-  New-NetFirewallRule -DisplayName "Sparkle" -Direction Inbound -Action Allow -Program "${exePath()}" -Enabled True -Profile Any -ErrorAction SilentlyContinue
-  `
-
   if (process.platform === 'win32') {
-    await execPromise(removeCommand, { shell: 'powershell' })
-    await execPromise(createCommand, { shell: 'powershell' })
+    setupFirewallRules([
+      { name: 'mihomo', applicationPath: mihomoCorePath('mihomo') },
+      { name: 'mihomo-alpha', applicationPath: mihomoCorePath('mihomo-alpha') },
+      { name: 'Sparkle', applicationPath: exePath() }
+    ])
   }
 }
 
@@ -105,16 +113,33 @@ const elevateTaskXml = `<?xml version="1.0" encoding="UTF-16"?>
 </Task>
 `
 
-export function createElevateTaskSync(): void {
+function prepareElevateTaskFile(): string {
   const taskFilePath = path.join(taskDir(), `sparkle-run.xml`)
   writeFileSync(taskFilePath, Buffer.from(`\ufeff${elevateTaskXml}`, 'utf-16le'))
   copyFileSync(
     path.join(resourcesFilesDir(), 'sparkle-run.exe'),
     path.join(taskDir(), 'sparkle-run.exe')
   )
+  return taskFilePath
+}
+
+export function createElevateTaskSync(): void {
+  const taskFilePath = prepareElevateTaskFile()
   execSync(
     `%SystemRoot%\\System32\\schtasks.exe /create /tn "sparkle-run" /xml "${taskFilePath}" /f`
   )
+}
+
+export async function createElevateTask(): Promise<void> {
+  const taskFilePath = prepareElevateTaskFile()
+  await execWithElevation('schtasks.exe', [
+    '/create',
+    '/tn',
+    'sparkle-run',
+    '/xml',
+    taskFilePath,
+    '/f'
+  ])
 }
 
 export async function deleteElevateTask(): Promise<void> {

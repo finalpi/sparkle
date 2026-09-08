@@ -16,24 +16,19 @@ import { useProfileConfig } from '@renderer/hooks/use-profile-config'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { getFilePath, readTextFile, subStoreCollections, subStoreSubs } from '@renderer/utils/ipc'
 import type { KeyboardEvent } from 'react'
-import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { MdContentPaste } from 'react-icons/md'
-import {
-  DndContext,
-  closestCenter,
-  PointerSensor,
-  useSensor,
-  useSensors,
-  DragEndEvent
-} from '@dnd-kit/core'
+import { DndContext, closestCenter, DragEndEvent } from '@dnd-kit/core'
 import { SortableContext } from '@dnd-kit/sortable'
 import { FaPlus } from 'react-icons/fa6'
 import { IoMdRefresh } from 'react-icons/io'
 import { MdTune } from 'react-icons/md'
 import SubStoreIcon from '@renderer/components/base/substore-icon'
-import ProfileSettingModal from '@renderer/components/profiles/profile-setting-modal'
+import ProfileSettingDrawer from '@renderer/components/profiles/profile-setting-drawer'
 import useSWR from 'swr'
 import { useNavigate } from 'react-router-dom'
+import { useCardDndSensors } from '@renderer/hooks/use-card-dnd-sensors'
+import { notify } from '@renderer/utils/notification'
 
 const emptyItems: ProfileItem[] = []
 
@@ -60,17 +55,12 @@ const Profiles: React.FC = () => {
   const [switching, setSwitching] = useState(false)
   const [fileOver, setFileOver] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [isSettingModalOpen, setIsSettingModalOpen] = useState(false)
+  const [isSettingDrawerOpen, setIsSettingDrawerOpen] = useState(false)
+  const [settingDrawerReopenSignal, setSettingDrawerReopenSignal] = useState(0)
   const [editingItem, setEditingItem] = useState<ProfileItem | null>(null)
   const [url, setUrl] = useState('')
   const isUrlEmpty = url.trim() === ''
-  const sensors = useSensors(
-    useSensor(PointerSensor, {
-      activationConstraint: {
-        distance: 2
-      }
-    })
-  )
+  const sensors = useCardDndSensors()
   const { data: subs = [], mutate: mutateSubs } = useSWR(
     useSubStore ? 'subStoreSubs' : undefined,
     useSubStore ? subStoreSubs : (): undefined => {}
@@ -107,7 +97,7 @@ const Profiles: React.FC = () => {
               </div>
             </div>
           ),
-          icon: sub.icon ? <img src={sub.icon} className="h-[18px] w-[18px]" /> : null,
+          icon: sub.icon ? <img src={sub.icon} className="h-4.5 w-4.5" /> : null,
           divider: index === subs.length - 1 && Boolean(collections) && collections.length > 0
         })
       })
@@ -130,7 +120,7 @@ const Profiles: React.FC = () => {
               </div>
             </div>
           ),
-          icon: sub.icon ? <img src={sub.icon} className="h-[18px] w-[18px]" /> : null,
+          icon: sub.icon ? <img src={sub.icon} className="h-4.5 w-4.5" /> : null,
           divider: false
         })
       })
@@ -138,10 +128,14 @@ const Profiles: React.FC = () => {
     return items
   }, [subs, collections])
   const handleImport = async (importUrl: string): Promise<void> => {
+    if (importing) return
     setImporting(true)
-    await addProfileItem({ name: '', type: 'remote', url: importUrl, useProxy, autoUpdate: true })
-    setUrl('')
-    setImporting(false)
+    try {
+      await addProfileItem({ name: '', type: 'remote', url: importUrl, useProxy, autoUpdate: true })
+      setUrl('')
+    } finally {
+      setImporting(false)
+    }
   }
   const pageRef = useRef<HTMLDivElement>(null)
 
@@ -152,21 +146,20 @@ const Profiles: React.FC = () => {
         const newOrder = sortedItems.slice()
         const activeIndex = newOrder.findIndex((item) => item.id === active.id)
         const overIndex = newOrder.findIndex((item) => item.id === over.id)
-        newOrder.splice(activeIndex, 1)
-        newOrder.splice(overIndex, 0, itemsArray[activeIndex])
+        if (activeIndex === -1 || overIndex === -1) return
+        const [activeItem] = newOrder.splice(activeIndex, 1)
+        if (!activeItem) return
+        newOrder.splice(overIndex, 0, activeItem)
         setSortedItems(newOrder)
         await setProfileConfig({ current, items: newOrder })
       }
     }
   }
 
-  const handleInputKeyUp = useCallback(
-    (e: KeyboardEvent<HTMLInputElement>) => {
-      if (e.key !== 'Enter' || isUrlEmpty) return
-      handleImport((e.currentTarget as HTMLInputElement).value)
-    },
-    [isUrlEmpty]
-  )
+  const handleInputKeyUp = (e: KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key !== 'Enter' || isUrlEmpty || importing) return
+    handleImport(e.currentTarget.value)
+  }
 
   useEffect(() => {
     pageRef.current?.addEventListener('dragover', (e) => {
@@ -177,13 +170,23 @@ const Profiles: React.FC = () => {
     pageRef.current?.addEventListener('dragleave', (e) => {
       e.preventDefault()
       e.stopPropagation()
+      const rect = pageRef.current?.getBoundingClientRect()
+      if (
+        rect &&
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom
+      )
+        return
       setFileOver(false)
     })
     pageRef.current?.addEventListener('drop', async (event) => {
       event.preventDefault()
       event.stopPropagation()
-      if (event.dataTransfer?.files) {
-        const file = event.dataTransfer.files[0]
+      const dataTransfer = event.dataTransfer
+      const file = dataTransfer?.files[0]
+      if (file) {
         if (
           file.name.endsWith('.yml') ||
           file.name.endsWith('.yaml') ||
@@ -197,10 +200,32 @@ const Profiles: React.FC = () => {
             const content = await readTextFile(path)
             await addProfileItem({ name: file.name, type: 'local', file: content })
           } catch (e) {
-            alert('文件导入失败' + e)
+            notify('文件导入失败' + e, { variant: 'danger' })
           }
         } else {
-          alert('不支持的文件类型')
+          notify('不支持的文件类型', { variant: 'danger' })
+        }
+      } else {
+        const droppedUrl =
+          dataTransfer
+            ?.getData('text/uri-list')
+            .split(/\r?\n/)
+            .find((value) => value && !value.startsWith('#')) ||
+          dataTransfer?.getData('text/plain').trim()
+        try {
+          const urlObj = new URL(droppedUrl || '')
+          if (urlObj.protocol !== 'http:' && urlObj.protocol !== 'https:') throw new Error()
+          setEditingItem({
+            id: '',
+            name: '',
+            type: 'remote',
+            url: droppedUrl,
+            useProxy: false,
+            autoUpdate: true
+          })
+          setShowEditModal(true)
+        } catch {
+          notify('未检测到有效的订阅链接', { variant: 'danger' })
         }
       }
       setFileOver(false)
@@ -220,11 +245,11 @@ const Profiles: React.FC = () => {
     <BasePage
       ref={pageRef}
       title="订阅管理"
+      contentClassName="no-scrollbar"
       header={
         <>
           <Button
             size="sm"
-            title="更新全部订阅"
             className="app-nodrag"
             variant="light"
             isIconOnly
@@ -246,18 +271,25 @@ const Profiles: React.FC = () => {
           </Button>
           <Button
             size="sm"
-            title="订阅设置"
             className="app-nodrag"
             variant="light"
             isIconOnly
-            onPress={() => setIsSettingModalOpen(true)}
+            onPress={() => {
+              setIsSettingDrawerOpen(true)
+              setSettingDrawerReopenSignal((signal) => signal + 1)
+            }}
           >
             <MdTune className="text-lg" />
           </Button>
         </>
       }
     >
-      {isSettingModalOpen && <ProfileSettingModal onClose={() => setIsSettingModalOpen(false)} />}
+      {isSettingDrawerOpen && (
+        <ProfileSettingDrawer
+          reopenSignal={settingDrawerReopenSignal}
+          onClose={() => setIsSettingDrawerOpen(false)}
+        />
+      )}
       {showEditModal && editingItem && (
         <EditInfoModal
           item={editingItem}
@@ -273,7 +305,7 @@ const Profiles: React.FC = () => {
           }}
         />
       )}
-      <div className="sticky profiles-sticky top-0 z-40 bg-background">
+      <div className="sticky profiles-sticky top-0 z-40">
         <div className="flex p-2">
           <Input
             size="sm"
@@ -326,7 +358,6 @@ const Profiles: React.FC = () => {
               <DropdownTrigger>
                 <Button
                   isLoading={subStoreImporting}
-                  title="Sub-Store"
                   className="ml-2 substore-import"
                   size="sm"
                   isIconOnly
@@ -356,7 +387,7 @@ const Profiles: React.FC = () => {
                         useProxy
                       })
                     } catch (e) {
-                      alert(e)
+                      notify(e, { variant: 'danger' })
                     } finally {
                       setSubStoreImporting(false)
                     }
@@ -377,7 +408,7 @@ const Profiles: React.FC = () => {
                         useProxy
                       })
                     } catch (e) {
-                      alert(e)
+                      notify(e, { variant: 'danger' })
                     } finally {
                       setSubStoreImporting(false)
                     }
@@ -410,7 +441,7 @@ const Profiles: React.FC = () => {
                         await addProfileItem({ name: fileName, type: 'local', file: content })
                       }
                     } catch (e) {
-                      alert(e)
+                      notify(e, { variant: 'danger' })
                     }
                     break
                   }
@@ -470,7 +501,9 @@ const Profiles: React.FC = () => {
                 onClick={async () => {
                   setSwitching(true)
                   await changeCurrentProfile(item.id)
-                  await new Promise((resolve) => setTimeout(resolve, 500))
+                  await new Promise((resolve) => {
+                    setTimeout(resolve, 500)
+                  })
                   setSwitching(false)
                 }}
               />

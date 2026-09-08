@@ -1,17 +1,11 @@
-import {
-  Modal,
-  ModalContent,
-  ModalHeader,
-  ModalBody,
-  ModalFooter,
-  Button,
-  Switch
-} from '@heroui/react'
+import { Button, Label, Modal, Switch } from '@heroui-v3/react'
+import { Spinner } from '@heroui/react'
 import React, { useEffect, useState } from 'react'
 import { BaseEditor } from '../base/base-editor-lazy'
 import { getProfileStr, setProfileStr } from '@renderer/utils/ipc'
 import { useNavigate } from 'react-router-dom'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
+import { notify } from '@renderer/utils/notification'
 import ConfirmModal from '../base/base-confirm'
 
 interface Props {
@@ -22,9 +16,11 @@ interface Props {
 
 const EditFileModal: React.FC<Props> = (props) => {
   const { id, isRemote, onClose } = props
-  const { appConfig: { disableAnimation = false } = {} } = useAppConfig()
+  useAppConfig()
   const [currData, setCurrData] = useState('')
   const [originalData, setOriginalData] = useState('')
+  const [isLoading, setIsLoading] = useState(true)
+  const [isSaving, setIsSaving] = useState(false)
   const [isDiff, setIsDiff] = useState(false)
   const [sideBySide, setSideBySide] = useState(false)
   const [isConfirmOpen, setIsConfirmOpen] = useState(false)
@@ -40,10 +36,26 @@ const EditFileModal: React.FC<Props> = (props) => {
     }
   }
 
+  const save = async (): Promise<void> => {
+    setIsSaving(true)
+    try {
+      await setProfileStr(id, currData)
+      onClose()
+    } catch (e) {
+      notify(e, { variant: 'danger' })
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
   const getContent = async (): Promise<void> => {
-    const data = await getProfileStr(id)
-    setCurrData(data)
-    setOriginalData(data)
+    try {
+      const data = await getProfileStr(id)
+      setCurrData(data)
+      setOriginalData(data)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -51,19 +63,7 @@ const EditFileModal: React.FC<Props> = (props) => {
   }, [])
 
   return (
-    <Modal
-      backdrop={disableAnimation ? 'transparent' : 'blur'}
-      disableAnimation={disableAnimation}
-      classNames={{
-        base: 'max-w-none w-full',
-        backdrop: 'top-[48px]'
-      }}
-      size="5xl"
-      hideCloseButton
-      isOpen={true}
-      onOpenChange={handleClose}
-      scrollBehavior="inside"
-    >
+    <Modal>
       {isConfirmOpen && (
         <ConfirmModal
           title="确认取消"
@@ -74,64 +74,81 @@ const EditFileModal: React.FC<Props> = (props) => {
           onConfirm={onClose}
         />
       )}
-      <ModalContent className="h-full w-[calc(100%-100px)]">
-        <ModalHeader className="flex pb-0 app-drag">
-          <div className="flex justify-start">
-            <div className="flex items-center">编辑订阅</div>
-            {isRemote && (
-              <small className="ml-2 text-foreground-500">
-                注意：此处编辑配置更新订阅后会还原，如需要自定义配置请使用
-                <Button
-                  size="sm"
-                  color="primary"
-                  variant="light"
-                  className="app-nodrag"
-                  onPress={() => {
-                    navigate('/override')
-                  }}
-                >
-                  覆写
+      <Modal.Backdrop
+        isOpen={true}
+        onOpenChange={handleClose}
+        variant="blur"
+        className="top-12 h-[calc(100%-48px)]"
+      >
+        <Modal.Container scroll="inside">
+          <Modal.Dialog className="mt-4 h-[calc(100%-32px)] max-w-none w-[calc(100%-100px)]">
+            <Modal.Header className="app-drag pb-0">
+              <div className="flex justify-start">
+                <Modal.Heading className="flex items-center">编辑订阅</Modal.Heading>
+                {isRemote && (
+                  <small className="ml-2 text-foreground-500">
+                    注意：此处编辑配置更新订阅后会还原，如需要自定义配置请使用
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="app-nodrag"
+                      onPress={() => {
+                        navigate('/override')
+                      }}
+                    >
+                      覆写
+                    </Button>
+                    功能
+                  </small>
+                )}
+              </div>
+            </Modal.Header>
+            <Modal.Body className="h-full">
+              {isLoading ? (
+                <div className="flex h-full items-center justify-center">
+                  <Spinner size="lg" />
+                </div>
+              ) : (
+                <BaseEditor
+                  language="yaml"
+                  value={currData}
+                  originalValue={isDiff ? originalData : undefined}
+                  onChange={(value) => setCurrData(value)}
+                  diffRenderSideBySide={sideBySide}
+                />
+              )}
+            </Modal.Body>
+            <Modal.Footer className="flex justify-between pt-0 pb-0">
+              <div className="flex items-center space-x-2">
+                <Switch size="sm" isSelected={isDiff} onChange={setIsDiff}>
+                  <Switch.Content>
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                    <Label>显示修改</Label>
+                  </Switch.Content>
+                </Switch>
+                <Switch size="sm" isSelected={sideBySide} onChange={setSideBySide}>
+                  <Switch.Content>
+                    <Switch.Control>
+                      <Switch.Thumb />
+                    </Switch.Control>
+                    <Label>侧边显示</Label>
+                  </Switch.Content>
+                </Switch>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="secondary" onPress={handleClose}>
+                  取消
                 </Button>
-                功能
-              </small>
-            )}
-          </div>
-        </ModalHeader>
-        <ModalBody className="h-full">
-          <BaseEditor
-            language="yaml"
-            value={currData}
-            originalValue={isDiff ? originalData : undefined}
-            onChange={(value) => setCurrData(value)}
-            diffRenderSideBySide={sideBySide}
-          />
-        </ModalBody>
-        <ModalFooter className="pt-0 flex justify-between">
-          <div className="flex items-center space-x-2">
-            <Switch size="sm" isSelected={isDiff} onValueChange={setIsDiff}>
-              显示修改
-            </Switch>
-            <Switch size="sm" isSelected={sideBySide} onValueChange={setSideBySide}>
-              侧边显示
-            </Switch>
-          </div>
-          <div className="flex gap-2">
-            <Button size="sm" variant="light" onPress={handleClose}>
-              取消
-            </Button>
-            <Button
-              size="sm"
-              color="primary"
-              onPress={async () => {
-                await setProfileStr(id, currData)
-                onClose()
-              }}
-            >
-              保存
-            </Button>
-          </div>
-        </ModalFooter>
-      </ModalContent>
+                <Button size="sm" variant="primary" isPending={isSaving} onPress={() => save()}>
+                  保存
+                </Button>
+              </div>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
     </Modal>
   )
 }

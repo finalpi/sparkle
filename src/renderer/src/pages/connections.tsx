@@ -1,13 +1,28 @@
 import BasePage from '@renderer/components/base/base-page'
-import { mihomoCloseAllConnections, mihomoCloseConnection } from '@renderer/utils/ipc'
-import React, { Key, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Divider, Input, Select, SelectItem, Tab, Tabs } from '@heroui/react'
+import { mihomoCloseConnections, mihomoCloseConnection } from '@renderer/utils/ipc'
+import React, { Key, KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
+import {
+  Badge,
+  Button,
+  Divider,
+  Input,
+  Select,
+  SelectItem,
+  Tab,
+  Tabs,
+  Tooltip
+} from '@heroui/react'
 import { calcTraffic } from '@renderer/utils/calc'
 import ConnectionItem from '@renderer/components/connections/connection-item'
-import { Virtuoso } from 'react-virtuoso'
-import dayjs from 'dayjs'
+import { Virtuoso, GroupedVirtuoso } from 'react-virtuoso'
 import ConnectionDetailModal from '@renderer/components/connections/connection-detail-modal'
-import ConnectionSettingModal from '@renderer/components/connections/connection-setting-modal'
+import ConnectionSettingDrawer from '@renderer/components/connections/connection-setting-drawer'
+import ConnectionGroupHeader from '@renderer/components/connections/connection-group-header'
+import {
+  buildConnectionGroups,
+  type ConnectionGroup
+} from '@renderer/components/connections/connection-groups'
 import { CgClose, CgTrash } from 'react-icons/cg'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { includesIgnoreCase } from '@renderer/utils/includes'
@@ -17,6 +32,14 @@ import { cropAndPadTransparent } from '@renderer/utils/image'
 import { platform } from '@renderer/utils/init'
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
 import { MdTune } from 'react-icons/md'
+import { IoPause, IoPlay } from 'react-icons/io5'
+import { compileAdvancedFilter } from '@renderer/utils/advanced-filter'
+import {
+  ConnectionFilterCompletionSession,
+  buildConnectionFilterSuggestionResult,
+  getEnhancedConnectionFilterSuggestions,
+  isConnectionFilterCompletionSessionActive
+} from '@renderer/utils/connection-filter-autocomplete'
 
 let cachedConnections: ControllerConnectionDetail[] = []
 
@@ -28,8 +51,12 @@ const Connections: React.FC = () => {
   const {
     connectionDirection = 'asc',
     connectionOrderBy = 'time',
+    connectionInterval = 500,
     displayIcon = true,
-    displayAppName = true
+    displayAppName = true,
+    connectionGroupByProcess = false,
+    connectionGroupSort = 'name',
+    connectionGroupDirection = 'asc'
   } = appConfig || {}
   const [connectionsInfo, setConnectionsInfo] = useState<ControllerConnections>()
   const [allConnections, setAllConnections] =
@@ -37,7 +64,8 @@ const Connections: React.FC = () => {
   const [activeConnections, setActiveConnections] = useState<ControllerConnectionDetail[]>([])
   const [closedConnections, setClosedConnections] = useState<ControllerConnectionDetail[]>([])
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
-  const [isSettingModalOpen, setIsSettingModalOpen] = useState(false)
+  const [isSettingDrawerOpen, setIsSettingDrawerOpen] = useState(false)
+  const [settingDrawerReopenSignal, setSettingDrawerReopenSignal] = useState(0)
   const [selected, setSelected] = useState<ControllerConnectionDetail>()
 
   const [iconMap, setIconMap] = useState<Record<string, string>>({})
@@ -45,7 +73,11 @@ const Connections: React.FC = () => {
   const [firstItemRefreshTrigger, setFirstItemRefreshTrigger] = useState(0)
 
   const [tab, setTab] = useState('active')
+  const [paused, setPaused] = useState(false)
+  const pausedRef = useRef(paused)
   const [deletedIds, setDeletedIds] = useState<Set<string>>(new Set())
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [expandedContent, setExpandedContent] = useState<Set<string>>(new Set())
 
   const iconRequestQueue = useRef(new Set<string>())
   const processingIcons = useRef(new Set<string>())
@@ -54,13 +86,25 @@ const Connections: React.FC = () => {
   const appNameRequestQueue = useRef(new Set<string>())
   const processingAppNames = useRef(new Set<string>())
   const processAppNameTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const filterInputRef = useRef<HTMLInputElement>(null)
+  const suppressSelectRef = useRef(false)
+  const allConnectionsRef = useRef(allConnections)
+  const activeConnectionsRef = useRef(activeConnections)
+  const deletedIdsRef = useRef(deletedIds)
+  const filteredConnectionsRef = useRef<ControllerConnectionDetail[]>([])
+  const iconMapRef = useRef<Record<string, string>>({})
+  const appNameCacheRef = useRef<Record<string, string>>({})
 
-  const filteredConnections = useMemo(() => {
-    const connections = tab === 'active' ? activeConnections : closedConnections
+  const lastActiveTime = useRef<Map<string, number>>(new Map())
+  const [isFilterFocused, setIsFilterFocused] = useState(false)
+  const [filterCursor, setFilterCursor] = useState(0)
+  const [filterScrollLeft, setFilterScrollLeft] = useState(0)
+  const [completionSession, setCompletionSession] =
+    useState<ConnectionFilterCompletionSession | null>(null)
 
-    let filtered = connections
-    if (filter !== '') {
-      filtered = connections.filter((connection) => {
+  const compiledFilter = useMemo(
+    () =>
+      compileAdvancedFilter(filter, (connection: ControllerConnectionDetail, query: string) => {
         const searchableFields = [
           connection.metadata.process,
           connection.metadata.host,
@@ -73,61 +117,144 @@ const Connections: React.FC = () => {
           .filter(Boolean)
           .join(' ')
 
-        return includesIgnoreCase(searchableFields, filter)
-      })
+        return includesIgnoreCase(searchableFields, query)
+      }),
+    [filter]
+  )
+  const filterSuggestions = useMemo(
+    () => getEnhancedConnectionFilterSuggestions(filter, filterCursor),
+    [filter, filterCursor]
+  )
+  const inlineCompletionSuffix = useMemo(() => {
+    if (!isFilterFocused || filterCursor !== filter.length || filter === '') {
+      return ''
+    }
+
+    const suggestion = filterSuggestions[0]
+    if (!suggestion) return ''
+
+    const { nextValue } = buildConnectionFilterSuggestionResult(filter, suggestion)
+    if (!nextValue.startsWith(filter)) return ''
+
+    return nextValue.slice(filter.length)
+  }, [filter, filterCursor, filterSuggestions, isFilterFocused])
+  const filteredConnections = useMemo(() => {
+    const connections = tab === 'active' ? activeConnections : closedConnections
+
+    let filtered = connections
+    if (filter !== '') {
+      filtered = connections.filter((connection) => compiledFilter.matches(connection))
     }
 
     if (connectionOrderBy) {
-      filtered = [...filtered].sort((a, b) => {
-        if (connectionDirection === 'asc') {
-          switch (connectionOrderBy) {
-            case 'time':
-              return dayjs(b.start).unix() - dayjs(a.start).unix()
-            case 'upload':
-              return a.upload - b.upload
-            case 'download':
-              return a.download - b.download
-            case 'uploadSpeed':
-              return (a.uploadSpeed || 0) - (b.uploadSpeed || 0)
-            case 'downloadSpeed':
-              return (a.downloadSpeed || 0) - (b.downloadSpeed || 0)
-            case 'process':
-              return (a.metadata.process || '').localeCompare(b.metadata.process || '')
-          }
-        } else {
-          switch (connectionOrderBy) {
-            case 'time':
-              return dayjs(a.start).unix() - dayjs(b.start).unix()
-            case 'upload':
-              return b.upload - a.upload
-            case 'download':
-              return b.download - a.download
-            case 'uploadSpeed':
-              return (b.uploadSpeed || 0) - (a.uploadSpeed || 0)
-            case 'downloadSpeed':
-              return (b.downloadSpeed || 0) - (a.downloadSpeed || 0)
-            case 'process':
-              return (b.metadata.process || '').localeCompare(a.metadata.process || '')
-          }
-        }
-      })
+      const dir = connectionDirection === 'asc' ? 1 : -1
+      let comparator: (a: ControllerConnectionDetail, b: ControllerConnectionDetail) => number
+      switch (connectionOrderBy) {
+        case 'time':
+          comparator = (a, b) => (Date.parse(b.start) - Date.parse(a.start)) * dir
+          break
+        case 'upload':
+          comparator = (a, b) => (a.upload - b.upload) * dir
+          break
+        case 'download':
+          comparator = (a, b) => (a.download - b.download) * dir
+          break
+        case 'uploadSpeed':
+          comparator = (a, b) => ((a.uploadSpeed || 0) - (b.uploadSpeed || 0)) * dir
+          break
+        case 'downloadSpeed':
+          comparator = (a, b) => ((a.downloadSpeed || 0) - (b.downloadSpeed || 0)) * dir
+          break
+        case 'process':
+          comparator = (a, b) =>
+            (a.metadata.process || '').localeCompare(b.metadata.process || '') * dir
+          break
+        default:
+          return filtered
+      }
+      filtered = [...filtered].sort(comparator)
     }
 
     return filtered
-  }, [activeConnections, closedConnections, filter, connectionDirection, connectionOrderBy, tab])
+  }, [
+    activeConnections,
+    closedConnections,
+    filter,
+    compiledFilter,
+    connectionDirection,
+    connectionOrderBy,
+    tab
+  ])
+
+  const grouped = connectionGroupByProcess
+
+  const connectionGroups = useMemo<ConnectionGroup[]>(() => {
+    if (!grouped) return []
+    return buildConnectionGroups(
+      filteredConnections,
+      connectionGroupSort,
+      connectionGroupDirection === 'asc'
+    )
+  }, [grouped, filteredConnections, connectionGroupSort, connectionGroupDirection])
+
+  const { groupCounts, flatMembers, flatMemberLocalIndex } = useMemo(() => {
+    const counts: number[] = []
+    const members: ControllerConnectionDetail[] = []
+    const localIndex: number[] = []
+    for (const group of connectionGroups) {
+      if (expandedContent.has(group.key)) {
+        counts.push(group.connections.length)
+        group.connections.forEach((conn, idx) => {
+          members.push(conn)
+          localIndex.push(idx)
+        })
+      } else {
+        counts.push(0)
+      }
+    }
+    return { groupCounts: counts, flatMembers: members, flatMemberLocalIndex: localIndex }
+  }, [connectionGroups, expandedContent])
+
+  useEffect(() => {
+    if (!grouped) {
+      setExpandedGroups((prev) => (prev.size === 0 ? prev : new Set()))
+      setExpandedContent((prev) => (prev.size === 0 ? prev : new Set()))
+      return
+    }
+    const liveKeys = new Set(connectionGroups.map((g) => g.key))
+    const prune = (prev: Set<string>): Set<string> => {
+      let changed = false
+      const next = new Set<string>()
+      for (const key of prev) {
+        if (liveKeys.has(key)) next.add(key)
+        else changed = true
+      }
+      return changed ? next : prev
+    }
+    setExpandedGroups(prune)
+    setExpandedContent(prune)
+  }, [grouped, connectionGroups])
+
+  allConnectionsRef.current = allConnections
+  activeConnectionsRef.current = activeConnections
+  deletedIdsRef.current = deletedIds
+  filteredConnectionsRef.current = filteredConnections
+  iconMapRef.current = iconMap
+  appNameCacheRef.current = appNameCache
 
   const trashAllClosedConnection = useCallback((): void => {
-    if (closedConnections.length === 0) return
-
-    const trashIds = closedConnections.map((conn) => conn.id)
-    setDeletedIds((prev) => new Set([...prev, ...trashIds]))
-    setAllConnections((allConns) => {
-      const updatedConnections = allConns.filter((conn) => !trashIds.includes(conn.id))
-      cachedConnections = updatedConnections
-      return updatedConnections
+    setClosedConnections((closedConns) => {
+      if (closedConns.length === 0) return closedConns
+      const trashIds = new Set(closedConns.map((conn) => conn.id))
+      setDeletedIds((prev) => new Set([...prev, ...trashIds]))
+      setAllConnections((allConns) => {
+        const updatedConnections = allConns.filter((conn) => !trashIds.has(conn.id))
+        cachedConnections = updatedConnections
+        return updatedConnections
+      })
+      return []
     })
-    setClosedConnections([])
-  }, [closedConnections])
+  }, [])
 
   const trashClosedConnection = useCallback((id: string): void => {
     setDeletedIds((prev) => new Set([...prev, id]))
@@ -140,7 +267,7 @@ const Connections: React.FC = () => {
   }, [])
 
   const closeAllConnections = useCallback((): void => {
-    tab === 'active' ? mihomoCloseAllConnections() : trashAllClosedConnection()
+    tab === 'active' ? mihomoCloseConnections() : trashAllClosedConnection()
   }, [tab, trashAllClosedConnection])
 
   const closeConnection = useCallback(
@@ -150,19 +277,75 @@ const Connections: React.FC = () => {
     [tab, trashClosedConnection]
   )
 
+  const toggleGroup = useCallback((key: string, currentlyOpen: boolean): void => {
+    if (currentlyOpen) {
+      setExpandedContent((prev) => {
+        if (!prev.has(key)) return prev
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+      setExpandedGroups((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    } else {
+      setExpandedGroups((prev) => {
+        const next = new Set(prev)
+        next.add(key)
+        return next
+      })
+      setTimeout(() => {
+        setExpandedContent((prev) => {
+          if (prev.has(key)) return prev
+          const next = new Set(prev)
+          next.add(key)
+          return next
+        })
+      }, 0)
+    }
+  }, [])
+
+  const closeGroup = useCallback((key: string): void => {
+    const group = connectionGroupsRef.current.find((g) => g.key === key)
+    if (!group) return
+    const close = closeConnectionRef.current
+    group.connections.forEach((conn) => close(conn.id))
+  }, [])
+
   useEffect(() => {
     const handleConnections = (_e: unknown, info: ControllerConnections): void => {
+      if (pausedRef.current) return
       setConnectionsInfo(info)
 
       if (!info.connections) return
 
-      const prevActiveMap = new Map(activeConnections.map((conn) => [conn.id, conn]))
-      const existingConnectionIds = new Set(allConnections.map((conn) => conn.id))
+      const prevActiveMap = new Map(activeConnectionsRef.current.map((conn) => [conn.id, conn]))
+      const existingConnectionIds = new Set(allConnectionsRef.current.map((conn) => conn.id))
+      const speedRatio = 1000 / connectionInterval
+
+      const now = Date.now()
+      const activeConnIds = new Set(info.connections.map((conn) => conn.id))
+
+      activeConnIds.forEach((id) => {
+        lastActiveTime.current.set(id, now)
+      })
+
+      lastActiveTime.current.forEach((activeAt, id) => {
+        if (now - activeAt >= 1000) {
+          lastActiveTime.current.delete(id)
+        }
+      })
 
       const activeConns = info.connections.map((conn) => {
         const preConn = prevActiveMap.get(conn.id)
-        const downloadSpeed = preConn ? conn.download - preConn.download : 0
-        const uploadSpeed = preConn ? conn.upload - preConn.upload : 0
+        const downloadSpeed = preConn
+          ? Math.max(0, Math.round((conn.download - preConn.download) * speedRatio))
+          : 0
+        const uploadSpeed = preConn
+          ? Math.max(0, Math.round((conn.upload - preConn.upload) * speedRatio))
+          : 0
         const metadata =
           conn.metadata.type === 'Inner'
             ? { ...conn.metadata, process: 'mihomo', processPath: 'mihomo' }
@@ -178,19 +361,23 @@ const Connections: React.FC = () => {
       })
 
       const newConnections = activeConns.filter(
-        (conn) => !existingConnectionIds.has(conn.id) && !deletedIds.has(conn.id)
+        (conn) => !existingConnectionIds.has(conn.id) && !deletedIdsRef.current.has(conn.id)
       )
 
-      if (newConnections.length > 0) {
-        const updatedAllConnections = [...allConnections, ...newConnections]
+      const activeConnsMap = new Map(activeConns.map((ac) => [ac.id, ac]))
 
-        const activeConnIds = new Set(activeConns.map((conn) => conn.id))
+      if (newConnections.length > 0) {
+        const updatedAllConnections = [...allConnectionsRef.current, ...newConnections]
+
         const allConns = updatedAllConnections.map((conn) => {
-          const activeConn = activeConns.find((ac) => ac.id === conn.id)
-          return activeConn || { ...conn, isActive: false, downloadSpeed: 0, uploadSpeed: 0 }
+          const activeConn = activeConnsMap.get(conn.id)
+          if (activeConn) return activeConn
+          const lastActive = lastActiveTime.current.get(conn.id) || 0
+          const isStillActive = now - lastActive < 1000
+          return { ...conn, isActive: isStillActive, downloadSpeed: 0, uploadSpeed: 0 }
         })
 
-        const closedConns = allConns.filter((conn) => !activeConnIds.has(conn.id))
+        const closedConns = allConns.filter((conn) => !conn.isActive)
 
         setActiveConnections(activeConns)
         setClosedConnections(closedConns)
@@ -198,13 +385,15 @@ const Connections: React.FC = () => {
         setAllConnections(finalAllConnections)
         cachedConnections = finalAllConnections
       } else {
-        const activeConnIds = new Set(activeConns.map((conn) => conn.id))
-        const allConns = allConnections.map((conn) => {
-          const activeConn = activeConns.find((ac) => ac.id === conn.id)
-          return activeConn || { ...conn, isActive: false, downloadSpeed: 0, uploadSpeed: 0 }
+        const allConns = allConnectionsRef.current.map((conn) => {
+          const activeConn = activeConnsMap.get(conn.id)
+          if (activeConn) return activeConn
+          const lastActive = lastActiveTime.current.get(conn.id) || 0
+          const isStillActive = now - lastActive < 1000
+          return { ...conn, isActive: isStillActive, downloadSpeed: 0, uploadSpeed: 0 }
         })
 
-        const closedConns = allConns.filter((conn) => !activeConnIds.has(conn.id))
+        const closedConns = allConns.filter((conn) => !conn.isActive)
 
         setActiveConnections(activeConns)
         setClosedConnections(closedConns)
@@ -218,7 +407,11 @@ const Connections: React.FC = () => {
     return (): void => {
       window.electron.ipcRenderer.removeAllListeners('mihomoConnections')
     }
-  }, [allConnections, activeConnections, closedConnections, deletedIds])
+  }, [connectionInterval])
+
+  useEffect(() => {
+    pausedRef.current = paused
+  }, [paused])
 
   const processAppNameQueue = useCallback(async () => {
     if (processingAppNames.current.size >= 3 || appNameRequestQueue.current.size === 0) return
@@ -280,7 +473,7 @@ const Connections: React.FC = () => {
 
         setIconMap((prev) => ({ ...prev, [path]: processedDataURL }))
 
-        const firstConnection = filteredConnections[0]
+        const firstConnection = filteredConnectionsRef.current[0]
         if (firstConnection?.metadata.processPath === path) {
           setFirstItemRefreshTrigger((prev) => prev + 1)
         }
@@ -296,23 +489,33 @@ const Connections: React.FC = () => {
     if (iconRequestQueue.current.size > 0) {
       processIconTimer.current = setTimeout(processIconQueue, 50)
     }
-  }, [filteredConnections])
+  }, [])
 
   useEffect(() => {
     if (!displayIcon || findProcessMode === 'off') return
 
     const visiblePaths = new Set<string>()
     const otherPaths = new Set<string>()
+    let loadOtherPathsTimer: ReturnType<typeof setTimeout> | null = null
 
-    const visibleConnections = filteredConnections.slice(0, 20)
+    let noProcessSeen = false
+    const visibleConnections = filteredConnectionsRef.current.slice(0, 20)
     visibleConnections.forEach((c) => {
       const path = c.metadata.processPath || ''
+      if (!path) {
+        noProcessSeen = true
+        return
+      }
       visiblePaths.add(path)
     })
 
     const collectPaths = (connections: ControllerConnectionDetail[]) => {
       for (const c of connections) {
         const path = c.metadata.processPath || ''
+        if (!path) {
+          noProcessSeen = true
+          continue
+        }
         if (!visiblePaths.has(path)) {
           otherPaths.add(path)
         }
@@ -323,12 +526,12 @@ const Connections: React.FC = () => {
     collectPaths(closedConnections)
 
     const loadIcon = (path: string, isVisible: boolean = false): void => {
-      if (iconMap[path] || processingIcons.current.has(path)) return
+      if (iconMapRef.current[path] || processingIcons.current.has(path)) return
 
       const fromStorage = localStorage.getItem(path)
       if (fromStorage) {
         setIconMap((prev) => ({ ...prev, [path]: fromStorage }))
-        if (isVisible && filteredConnections[0]?.metadata.processPath === path) {
+        if (isVisible && filteredConnectionsRef.current[0]?.metadata.processPath === path) {
           setFirstItemRefreshTrigger((prev) => prev + 1)
         }
         return
@@ -338,9 +541,12 @@ const Connections: React.FC = () => {
     }
 
     const loadAppName = (path: string): void => {
-      if (appNameCache[path] || processingAppNames.current.has(path)) return
+      if (!path) return
+      if (appNameCacheRef.current[path] || processingAppNames.current.has(path)) return
       appNameRequestQueue.current.add(path)
     }
+
+    if (noProcessSeen) loadIcon('', true)
 
     visiblePaths.forEach((path) => {
       loadIcon(path, true)
@@ -355,7 +561,7 @@ const Connections: React.FC = () => {
         })
       }
 
-      setTimeout(loadOtherPaths, 100)
+      loadOtherPathsTimer = setTimeout(loadOtherPaths, 100)
     }
 
     if (processIconTimer.current) clearTimeout(processIconTimer.current)
@@ -367,20 +573,11 @@ const Connections: React.FC = () => {
     }
 
     return (): void => {
+      if (loadOtherPathsTimer) clearTimeout(loadOtherPathsTimer)
       if (processIconTimer.current) clearTimeout(processIconTimer.current)
       if (processAppNameTimer.current) clearTimeout(processAppNameTimer.current)
     }
-  }, [
-    activeConnections,
-    closedConnections,
-    iconMap,
-    appNameCache,
-    displayIcon,
-    filteredConnections,
-    processIconQueue,
-    processAppNameQueue,
-    displayAppName
-  ])
+  }, [activeConnections, closedConnections, displayIcon, displayAppName, findProcessMode])
 
   const handleTabChange = useCallback((key: Key) => {
     setTab(key as string)
@@ -390,12 +587,7 @@ const Connections: React.FC = () => {
     async (v: unknown) => {
       await patchAppConfig({
         connectionOrderBy: (v as { currentKey: string }).currentKey as
-          | 'time'
-          | 'upload'
-          | 'download'
-          | 'uploadSpeed'
-          | 'downloadSpeed'
-          | 'process'
+          'time' | 'upload' | 'download' | 'uploadSpeed' | 'downloadSpeed' | 'process'
       })
     },
     [patchAppConfig]
@@ -407,8 +599,149 @@ const Connections: React.FC = () => {
     })
   }, [connectionDirection, patchAppConfig])
 
+  const syncFilterCursor = useCallback((fallback?: number) => {
+    const nextCursor = filterInputRef.current?.selectionStart ?? fallback ?? 0
+    const nextScrollLeft = filterInputRef.current?.scrollLeft ?? 0
+    setFilterCursor(nextCursor)
+    setFilterScrollLeft(nextScrollLeft)
+  }, [])
+
+  const applyFilterSuggestion = useCallback(
+    (input: HTMLInputElement, nextValue: string, nextCursor: number) => {
+      flushSync(() => {
+        setFilter(nextValue)
+        setFilterCursor(nextCursor)
+        setIsFilterFocused(true)
+      })
+
+      const restoreCaret = () => {
+        const activeInput = filterInputRef.current
+        if (!activeInput) {
+          suppressSelectRef.current = false
+          return
+        }
+
+        if (document.activeElement !== activeInput) {
+          activeInput.focus()
+        }
+
+        activeInput.setSelectionRange(nextCursor, nextCursor, 'forward')
+        activeInput.scrollLeft = activeInput.scrollWidth
+        suppressSelectRef.current = false
+        syncFilterCursor(nextCursor)
+      }
+
+      // Reuse the actively typing input element instead of re-focusing first.
+      suppressSelectRef.current = true
+      input.setSelectionRange(nextCursor, nextCursor, 'forward')
+      input.scrollLeft = input.scrollWidth
+      setFilterCursor(nextCursor)
+      setFilterScrollLeft(input.scrollLeft)
+      requestAnimationFrame(restoreCaret)
+    },
+    [syncFilterCursor]
+  )
+
+  const handleFilterValueChange = useCallback(
+    (value: string) => {
+      setCompletionSession(null)
+      setFilter(value)
+      requestAnimationFrame(() => syncFilterCursor(value.length))
+    },
+    [syncFilterCursor]
+  )
+
+  const handleFilterSelect = useCallback(
+    (event: React.SyntheticEvent<HTMLInputElement>) => {
+      event.stopPropagation()
+
+      if (suppressSelectRef.current) {
+        return
+      }
+
+      setCompletionSession(null)
+      syncFilterCursor()
+    },
+    [syncFilterCursor]
+  )
+
+  useEffect(() => {
+    const inputElement = filterInputRef.current
+    if (!inputElement) return
+
+    const handleScroll = () => syncFilterCursor()
+    inputElement.addEventListener('scroll', handleScroll)
+
+    return () => {
+      inputElement.removeEventListener('scroll', handleScroll)
+    }
+  }, [syncFilterCursor])
+
+  const handleFilterKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLInputElement>) => {
+      if (event.nativeEvent.isComposing) return
+
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        event.stopPropagation()
+        event.nativeEvent.stopImmediatePropagation?.()
+
+        const currentInput = event.currentTarget
+        const currentValue = event.currentTarget.value
+        const currentCursor = event.currentTarget.selectionStart ?? filterCursor
+        const isCurrentSessionActive = isConnectionFilterCompletionSessionActive(
+          completionSession,
+          currentValue,
+          currentCursor
+        )
+
+        if (isCurrentSessionActive && completionSession) {
+          const total = completionSession.suggestions.length
+          const direction = event.shiftKey ? -1 : 1
+          const nextIndex = (completionSession.currentIndex + direction + total) % total
+          const nextSuggestion = completionSession.suggestions[nextIndex]
+          const { nextCursor, nextValue } = buildConnectionFilterSuggestionResult(
+            completionSession.baseValue,
+            nextSuggestion
+          )
+
+          setCompletionSession({ ...completionSession, currentIndex: nextIndex })
+          applyFilterSuggestion(currentInput, nextValue, nextCursor)
+          return
+        }
+
+        const nextSuggestions = getEnhancedConnectionFilterSuggestions(currentValue, currentCursor)
+        if (nextSuggestions.length === 0) {
+          setCompletionSession(null)
+          return
+        }
+
+        const nextIndex = event.shiftKey ? nextSuggestions.length - 1 : 0
+        const nextSuggestion = nextSuggestions[nextIndex]
+        const { nextCursor, nextValue } = buildConnectionFilterSuggestionResult(
+          currentValue,
+          nextSuggestion
+        )
+
+        setCompletionSession({
+          baseValue: currentValue,
+          currentIndex: nextIndex,
+          suggestions: nextSuggestions
+        })
+        applyFilterSuggestion(currentInput, nextValue, nextCursor)
+        return
+      }
+
+      if (event.key === 'Escape') {
+        setCompletionSession(null)
+      }
+    },
+    [applyFilterSuggestion, completionSession, filterCursor]
+  )
+
   const renderConnectionItem = useCallback(
     (i: number, connection: ControllerConnectionDetail) => {
+      if (!connection) return <div style={{ minHeight: 80 }} />
       const path = connection.metadata.processPath || ''
       const iconUrl = (displayIcon && findProcessMode !== 'off' && iconMap[path]) || ''
       const itemKey = i === 0 ? `${connection.id}-${firstItemRefreshTrigger}` : connection.id
@@ -444,6 +777,102 @@ const Connections: React.FC = () => {
     ]
   )
 
+  const flatMembersRef = useRef(flatMembers)
+  flatMembersRef.current = flatMembers
+  const flatMemberLocalIndexRef = useRef(flatMemberLocalIndex)
+  flatMemberLocalIndexRef.current = flatMemberLocalIndex
+  const connectionGroupsRef = useRef(connectionGroups)
+  connectionGroupsRef.current = connectionGroups
+  const expandedGroupsRef = useRef(expandedGroups)
+  expandedGroupsRef.current = expandedGroups
+  const selectedRef = useRef(selected)
+  selectedRef.current = selected
+  const iconMapRefStable = useRef(iconMap)
+  iconMapRefStable.current = iconMap
+  const appNameCacheRefStable = useRef(appNameCache)
+  appNameCacheRefStable.current = appNameCache
+  const closeConnectionRef = useRef(closeConnection)
+  closeConnectionRef.current = closeConnection
+  const displayIconRef = useRef(displayIcon)
+  displayIconRef.current = displayIcon
+  const displayAppNameRef = useRef(displayAppName)
+  displayAppNameRef.current = displayAppName
+  const findProcessModeRef = useRef(findProcessMode)
+  findProcessModeRef.current = findProcessMode
+  const tabRef = useRef(tab)
+  tabRef.current = tab
+
+  const toggleGroupRef = useRef(toggleGroup)
+  toggleGroupRef.current = toggleGroup
+  const toggleGroupStable = useCallback((key: string, currentlyOpen: boolean) => {
+    toggleGroupRef.current(key, currentlyOpen)
+  }, [])
+  const closeGroupRef = useRef(closeGroup)
+  closeGroupRef.current = closeGroup
+  const closeGroupStable = useCallback((key: string) => {
+    closeGroupRef.current(key)
+  }, [])
+
+  const renderGroupMember = useCallback((i: number) => {
+    const connection = flatMembersRef.current[i]
+    if (!connection) return <div style={{ minHeight: 80 }} />
+    const path = connection.metadata.processPath || ''
+    const displayName =
+      displayAppNameRef.current && path ? appNameCacheRefStable.current[path] : undefined
+    const localIndex = flatMemberLocalIndexRef.current[i] ?? 0
+
+    return (
+      <div className="pl-6" style={{ animation: 'proxy-row-in 0.15s ease both' }}>
+        <ConnectionItem
+          setSelected={setSelected}
+          setIsDetailModalOpen={setIsDetailModalOpen}
+          selected={selectedRef.current}
+          iconUrl=""
+          displayIcon={false}
+          displayName={displayName}
+          hideProcess
+          close={closeConnectionRef.current}
+          index={localIndex}
+          key={connection.id}
+          info={connection}
+        />
+      </div>
+    )
+  }, [])
+
+  const renderGroupHeader = useCallback(
+    (index: number) => {
+      const group = connectionGroupsRef.current[index]
+      if (!group) return <div>Never See This</div>
+      const path = group.processPath || ''
+      const showIcon = displayIconRef.current && findProcessModeRef.current !== 'off'
+      const iconUrl = (showIcon && iconMapRefStable.current[path]) || ''
+      const displayName =
+        displayAppNameRef.current && path ? appNameCacheRefStable.current[path] : undefined
+
+      return (
+        <ConnectionGroupHeader
+          groupKey={group.key}
+          label={group.label}
+          count={group.count}
+          upload={group.upload}
+          download={group.download}
+          uploadSpeed={group.uploadSpeed}
+          downloadSpeed={group.downloadSpeed}
+          expanded={expandedGroupsRef.current.has(group.key)}
+          isLast={index === connectionGroupsRef.current.length - 1}
+          isClosed={tabRef.current === 'closed'}
+          displayIcon={showIcon}
+          iconUrl={iconUrl}
+          displayName={displayName}
+          onToggle={toggleGroupStable}
+          onCloseAll={closeGroupStable}
+        />
+      )
+    },
+    [toggleGroupStable, closeGroupStable]
+  )
+
   return (
     <BasePage
       title="连接"
@@ -467,10 +896,10 @@ const Connections: React.FC = () => {
             >
               <Button
                 className="app-nodrag ml-1"
-                title={tab === 'active' ? '关闭全部连接' : '清空已关闭连接'}
                 isIconOnly
                 size="sm"
                 variant="light"
+                aria-label={tab === 'active' ? '关闭所有连接' : '清空记录'}
                 onPress={() => {
                   if (filter === '') {
                     closeAllConnections()
@@ -492,10 +921,28 @@ const Connections: React.FC = () => {
           <Button
             size="sm"
             isIconOnly
+            className="app-nodrag ml-2"
+            variant="light"
+            aria-label={paused ? '继续' : '暂停'}
+            onPress={() =>
+              setPaused((p) => {
+                pausedRef.current = !p
+                return !p
+              })
+            }
+          >
+            {paused ? <IoPlay className="text-lg" /> : <IoPause className="text-lg" />}
+          </Button>
+          <Button
+            size="sm"
+            isIconOnly
             className="app-nodrag"
             variant="light"
-            title="连接设置"
-            onPress={() => setIsSettingModalOpen(true)}
+            aria-label="连接设置"
+            onPress={() => {
+              setIsSettingDrawerOpen(true)
+              setSettingDrawerReopenSignal((signal) => signal + 1)
+            }}
           >
             <MdTune className="text-lg" />
           </Button>
@@ -505,8 +952,11 @@ const Connections: React.FC = () => {
       {isDetailModalOpen && selected && (
         <ConnectionDetailModal onClose={() => setIsDetailModalOpen(false)} connection={selected} />
       )}
-      {isSettingModalOpen && (
-        <ConnectionSettingModal onClose={() => setIsSettingModalOpen(false)} />
+      {isSettingDrawerOpen && (
+        <ConnectionSettingDrawer
+          reopenSignal={settingDrawerReopenSignal}
+          onClose={() => setIsSettingDrawerOpen(false)}
+        />
       )}
       <div className="overflow-x-auto sticky top-0 z-40">
         <div className="flex p-2 gap-2">
@@ -515,7 +965,7 @@ const Connections: React.FC = () => {
             color={tab === 'active' ? 'primary' : 'danger'}
             selectedKey={tab}
             variant="underlined"
-            className="w-fit h-[32px]"
+            className="w-fit h-8"
             onSelectionChange={handleTabChange}
           >
             <Tab
@@ -549,19 +999,75 @@ const Connections: React.FC = () => {
               }
             />
           </Tabs>
-          <Input
-            variant="flat"
-            size="sm"
-            value={filter}
-            placeholder="筛选过滤"
-            isClearable
-            onValueChange={setFilter}
-          />
+          <Tooltip
+            content={compiledFilter.error ?? '格式错误'}
+            placement="left"
+            isOpen={Boolean(compiledFilter.error)}
+            showArrow={true}
+            color="danger"
+            offset={10}
+          >
+            <div className="relative min-w-0 flex-1">
+              <Input
+                ref={filterInputRef}
+                variant="flat"
+                size="sm"
+                className={
+                  compiledFilter.error ? 'border-red-500 ring-1 ring-red-500 rounded-lg' : ''
+                }
+                classNames={{
+                  inputWrapper:
+                    'relative h-8 px-3 group-data-[focus-visible=true]:!ring-0 group-data-[focus-visible=true]:!ring-transparent group-data-[focus-visible=true]:!ring-offset-0',
+                  innerWrapper: 'overflow-hidden',
+                  input: 'font-mono text-sm tracking-normal focus-visible:!outline-none'
+                }}
+                value={filter}
+                placeholder="筛选过滤"
+                isClearable
+                isInvalid={Boolean(compiledFilter.error)}
+                onValueChange={handleFilterValueChange}
+                onKeyDown={handleFilterKeyDown}
+                onFocus={() => {
+                  setIsFilterFocused(true)
+                  requestAnimationFrame(() => syncFilterCursor())
+                }}
+                onBlur={() => {
+                  setCompletionSession(null)
+                  requestAnimationFrame(() => {
+                    const activeElement = document.activeElement
+                    if (activeElement !== filterInputRef.current) {
+                      setIsFilterFocused(false)
+                    }
+                  })
+                }}
+                onClick={() => {
+                  setCompletionSession(null)
+                  syncFilterCursor()
+                }}
+                onKeyUp={() => syncFilterCursor()}
+                onSelect={handleFilterSelect}
+              />
+              {inlineCompletionSuffix ? (
+                <div className="pointer-events-none absolute top-1/2 left-3 right-10 z-10 flex -translate-y-1/2 items-center overflow-hidden font-mono text-sm tracking-normal">
+                  <div
+                    className="flex items-center whitespace-pre"
+                    style={{ transform: `translateX(-${filterScrollLeft}px)` }}
+                  >
+                    <span className="invisible whitespace-pre">{filter}</span>
+                    <span className="whitespace-pre text-foreground-400/55">
+                      {inlineCompletionSuffix}
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </Tooltip>
 
           <Select
+            aria-label="排序字段"
             classNames={{ trigger: 'data-[hover=true]:bg-default-200' }}
             size="sm"
-            className="w-[180px] min-w-[120px]"
+            className="w-34 min-w-24 shrink-0"
             selectedKeys={new Set([connectionOrderBy])}
             disallowEmptySelection={true}
             onSelectionChange={handleOrderByChange}
@@ -573,7 +1079,13 @@ const Connections: React.FC = () => {
             <SelectItem key="time">时间</SelectItem>
             <SelectItem key="process">进程名称</SelectItem>
           </Select>
-          <Button size="sm" isIconOnly className="bg-content2" onPress={handleDirectionToggle}>
+          <Button
+            size="sm"
+            isIconOnly
+            className="bg-content2"
+            aria-label={connectionDirection === 'asc' ? '升序' : '降序'}
+            onPress={handleDirectionToggle}
+          >
             {connectionDirection === 'asc' ? (
               <HiSortAscending className="text-lg" />
             ) : (
@@ -584,7 +1096,28 @@ const Connections: React.FC = () => {
         <Divider />
       </div>
       <div className="h-[calc(100vh-100px)] mt-px">
-        <Virtuoso data={filteredConnections} itemContent={renderConnectionItem} />
+        {grouped ? (
+          connectionGroups.length > 0 ? (
+            <GroupedVirtuoso
+              key="connections-grouped"
+              groupCounts={groupCounts}
+              groupContent={renderGroupHeader}
+              itemContent={renderGroupMember}
+              defaultItemHeight={80}
+              overscan={200}
+            />
+          ) : (
+            <div className="h-full flex items-center justify-center text-foreground-500">
+              {filter === '' ? '暂无连接' : '没有匹配的进程'}
+            </div>
+          )
+        ) : (
+          <Virtuoso
+            key="connections-flat"
+            data={filteredConnections}
+            itemContent={renderConnectionItem}
+          />
+        )}
       </div>
     </BasePage>
   )

@@ -6,6 +6,8 @@ import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { restartCore } from '@renderer/utils/ipc'
 import EditableList from '../base/base-list-editor'
 import { platform } from '@renderer/utils/init'
+import { notify } from '@renderer/utils/notification'
+import PubSub from 'pubsub-js'
 
 const EnvSetting: React.FC = () => {
   const { appConfig, patchAppConfig } = useAppConfig()
@@ -21,7 +23,7 @@ const EnvSetting: React.FC = () => {
       await patchAppConfig({ [key]: value })
       await restartCore()
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     } finally {
       PubSub.publish('mihomo-core-changed')
     }
@@ -29,8 +31,8 @@ const EnvSetting: React.FC = () => {
   const [safePathsInput, setSafePathsInput] = useState(safePaths)
 
   return (
-    <SettingCard title="环境变量">
-      <SettingItem title="禁用系统 CA" divider>
+    <SettingCard header="环境变量">
+      <SettingItem compatKey="legacy" title="禁用系统 CA" divider>
         <Switch
           size="sm"
           isSelected={disableSystemCA}
@@ -39,7 +41,7 @@ const EnvSetting: React.FC = () => {
           }}
         />
       </SettingItem>
-      <SettingItem title="禁用内置 CA" divider>
+      <SettingItem compatKey="legacy" title="禁用内置 CA" divider>
         <Switch
           size="sm"
           isSelected={disableEmbedCA}
@@ -48,7 +50,7 @@ const EnvSetting: React.FC = () => {
           }}
         />
       </SettingItem>
-      <SettingItem title="禁用回环检测" divider>
+      <SettingItem compatKey="legacy" title="禁用回环检测" divider>
         <Switch
           size="sm"
           isSelected={disableLoopbackDetector}
@@ -58,7 +60,7 @@ const EnvSetting: React.FC = () => {
         />
       </SettingItem>
       {platform == 'linux' && (
-        <SettingItem title="禁用 nftables" divider>
+        <SettingItem compatKey="legacy" title="禁用 nftables" divider>
           <Switch
             size="sm"
             isSelected={disableNftables}
@@ -68,7 +70,7 @@ const EnvSetting: React.FC = () => {
           />
         </SettingItem>
       )}
-      <SettingItem title="可信路径">
+      <SettingItem compatKey="legacy" title="可信路径">
         {safePathsInput.join('') != safePaths.join('') && (
           <Button
             size="sm"

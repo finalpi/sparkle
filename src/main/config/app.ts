@@ -4,12 +4,20 @@ import { parseYaml, stringifyYaml } from '../utils/yaml'
 import { deepMerge } from '../utils/merge'
 import { defaultConfig } from '../utils/template'
 import { readFileSync, existsSync } from 'fs'
-import { encryptString, decryptString, isEncrypted } from '../utils/encrypt'
+import { systemCoreDefaultPath, systemCoreOnlyBuild } from '../../shared/build-flags'
 
 let appConfig: AppConfig
 let writePromise: Promise<void> = Promise.resolve()
 
-const ENCRYPTED_FIELDS = ['systemCorePath', 'serviceAuthKey'] as const
+function applyBuildConfig(config: AppConfig): AppConfig {
+  if (!systemCoreOnlyBuild) return config
+
+  return {
+    ...config,
+    core: 'system',
+    systemCorePath: config.systemCorePath || systemCoreDefaultPath
+  }
+}
 
 function isValidConfig(config: unknown): config is AppConfig {
   if (!config || typeof config !== 'object') return false
@@ -45,36 +53,6 @@ async function safeWriteConfig(content: string): Promise<void> {
   }
 }
 
-function decryptConfig(config: AppConfig): AppConfig {
-  const result = { ...config }
-
-  for (const field of ENCRYPTED_FIELDS) {
-    const value = result[field]
-    if (value && typeof value === 'string') {
-      if (!isEncrypted(value)) {
-        ;(result[field] as string) = ''
-      } else {
-        ;(result[field] as string) = decryptString(value)
-      }
-    }
-  }
-
-  return result
-}
-
-function encryptConfig(config: AppConfig): AppConfig {
-  const result = { ...config }
-
-  for (const field of ENCRYPTED_FIELDS) {
-    const value = result[field]
-    if (value && typeof value === 'string') {
-      ;(result[field] as string) = encryptString(value)
-    }
-  }
-
-  return result
-}
-
 export async function getAppConfig(force = false): Promise<AppConfig> {
   if (force || !appConfig) {
     try {
@@ -82,26 +60,29 @@ export async function getAppConfig(force = false): Promise<AppConfig> {
       const parsed = parseYaml<AppConfig>(data)
       if (!parsed || !isValidConfig(parsed)) {
         const backup = await readFile(`${appConfigPath()}.backup`, 'utf-8')
-        appConfig = decryptConfig(parseYaml<AppConfig>(backup))
+        appConfig = parseYaml<AppConfig>(backup)
       } else {
-        appConfig = decryptConfig(parsed)
+        appConfig = parsed
       }
     } catch (e) {
       appConfig = defaultConfig
     }
   }
   if (typeof appConfig !== 'object') appConfig = defaultConfig
+  appConfig = applyBuildConfig(appConfig)
   return appConfig
 }
 
-export async function patchAppConfig(patch: Partial<AppConfig>): Promise<void> {
+export async function patchAppConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
   const previousPromise = writePromise
-  writePromise = (async () => {
+  const currentPromise = (async () => {
     await previousPromise
-    appConfig = deepMerge(appConfig, patch)
-    await safeWriteConfig(stringifyYaml(encryptConfig(appConfig)))
+    appConfig = applyBuildConfig(deepMerge(appConfig, patch))
+    await safeWriteConfig(stringifyYaml(appConfig))
   })()
-  await writePromise
+  writePromise = currentPromise.catch(() => {})
+  await currentPromise
+  return appConfig
 }
 
 export function getAppConfigSync(): AppConfig {
@@ -109,10 +90,10 @@ export function getAppConfigSync(): AppConfig {
     const raw = readFileSync(appConfigPath(), 'utf-8')
     const data = parseYaml<AppConfig>(raw)
     if (typeof data === 'object' && data !== null) {
-      return decryptConfig(data)
+      return applyBuildConfig(data)
     }
-    return defaultConfig
+    return applyBuildConfig(defaultConfig)
   } catch (e) {
-    return defaultConfig
+    return applyBuildConfig(defaultConfig)
   }
 }

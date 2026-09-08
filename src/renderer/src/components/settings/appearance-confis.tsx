@@ -11,11 +11,13 @@ import {
   getFilePath,
   importThemes,
   relaunchApp,
+  readImageFileDataURL,
   resolveThemes,
   setDockVisible,
   showFloatingWindow,
   showTrayIcon,
   startMonitor,
+  updateTrayIcon,
   writeTheme
 } from '@renderer/utils/ipc'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
@@ -24,21 +26,30 @@ import { useTheme } from 'next-themes'
 import { IoIosHelpCircle, IoMdCloudDownload } from 'react-icons/io'
 import { MdEditDocument } from 'react-icons/md'
 import CSSEditorModal from './css-editor-modal'
+import TrayIconCropModal from './tray-icon-crop-modal'
+import { notify } from '@renderer/utils/notification'
+
+const rasterTrayIconPattern = /\.(png|jpe?g|webp)$/i
 
 const AppearanceConfig: React.FC = () => {
   const { appConfig, patchAppConfig } = useAppConfig()
   const [customThemes, setCustomThemes] = useState<{ key: string; label: string }[]>()
   const [openCSSEditor, setOpenCSSEditor] = useState(false)
+  const [trayIconCropDataURL, setTrayIconCropDataURL] = useState('')
   const [fetching, setFetching] = useState(false)
   const { setTheme } = useTheme()
   const {
     useDockIcon = true,
     showTraffic = false,
     proxyInTray = true,
+    trayProxyDelayLayout = 'auto',
+    customTrayIcon = '',
     disableTray = false,
     showFloatingWindow: showFloating = false,
     spinFloatingIcon = true,
     useWindowFrame = false,
+    enableWindowDrag = false,
+    showUpdateButtonAfterNotification = true,
     customTheme = 'default.css',
     appTheme = 'system'
   } = appConfig || {}
@@ -72,8 +83,20 @@ const AppearanceConfig: React.FC = () => {
           }}
         />
       )}
-      <SettingCard title="外观设置">
+      {trayIconCropDataURL && (
+        <TrayIconCropModal
+          imageDataURL={trayIconCropDataURL}
+          onCancel={() => setTrayIconCropDataURL('')}
+          onConfirm={async (dataURL) => {
+            await patchAppConfig({ customTrayIcon: dataURL })
+            setTrayIconCropDataURL('')
+            await updateTrayIcon()
+          }}
+        />
+      )}
+      <SettingCard header="外观设置">
         <SettingItem
+          compatKey="legacy"
           title="显示悬浮窗"
           actions={
             <Tooltip content="未禁用GPU加速的情况下，悬浮窗可能会导致应用崩溃">
@@ -97,9 +120,7 @@ const AppearanceConfig: React.FC = () => {
               if (v) {
                 await showFloatingWindow()
                 timeoutRef.current = setTimeout(async () => {
-                  if (localShowFloating) {
-                    await patchAppConfig({ showFloatingWindow: v })
-                  }
+                  await patchAppConfig({ showFloatingWindow: v })
                   timeoutRef.current = null
                 }, 1000)
               } else {
@@ -111,7 +132,7 @@ const AppearanceConfig: React.FC = () => {
         </SettingItem>
         {localShowFloating && (
           <>
-            <SettingItem title="根据网速旋转悬浮窗图标" divider>
+            <SettingItem compatKey="legacy" title="根据网速旋转悬浮窗图标" divider>
               <Switch
                 size="sm"
                 isSelected={spinFloatingIcon}
@@ -121,7 +142,7 @@ const AppearanceConfig: React.FC = () => {
                 }}
               />
             </SettingItem>
-            <SettingItem title="禁用托盘图标" divider>
+            <SettingItem compatKey="legacy" title="禁用托盘图标" divider>
               <Switch
                 size="sm"
                 isSelected={disableTray}
@@ -137,9 +158,63 @@ const AppearanceConfig: React.FC = () => {
             </SettingItem>
           </>
         )}
+        {!disableTray && (
+          <SettingItem
+            compatKey="legacy"
+            title="自定义托盘图标"
+            actions={
+              <Tooltip content="设置后托盘会使用此图标；开启网速显示时会与网速合成。PNG、JPG、WebP 会先裁剪后保存。">
+                <Button isIconOnly size="sm" variant="light">
+                  <IoIosHelpCircle className="text-lg" />
+                </Button>
+              </Tooltip>
+            }
+            divider
+          >
+            <div className="flex min-w-0 max-w-[65%] items-center justify-end gap-2">
+              {customTrayIcon && (
+                <span className="truncate text-xs text-default-500">
+                  {customTrayIcon.startsWith('data:image/') ? '已储存自定义图标' : customTrayIcon}
+                </span>
+              )}
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={async () => {
+                  const files = await getFilePath(
+                    ['png', 'jpg', 'jpeg', 'webp', 'ico', 'icns'],
+                    '选择托盘图标',
+                    '托盘图标'
+                  )
+                  if (!files?.[0]) return
+                  if (rasterTrayIconPattern.test(files[0])) {
+                    setTrayIconCropDataURL(await readImageFileDataURL(files[0]))
+                    return
+                  }
+                  await patchAppConfig({ customTrayIcon: await readImageFileDataURL(files[0]) })
+                  await updateTrayIcon()
+                }}
+              >
+                {customTrayIcon ? '更换图标' : '选择图标'}
+              </Button>
+              {customTrayIcon && (
+                <Button
+                  size="sm"
+                  variant="light"
+                  onPress={async () => {
+                    await patchAppConfig({ customTrayIcon: '' })
+                    await updateTrayIcon()
+                  }}
+                >
+                  恢复默认
+                </Button>
+              )}
+            </div>
+          </SettingItem>
+        )}
         {platform !== 'linux' && (
           <>
-            <SettingItem title="托盘菜单显示节点信息" divider>
+            <SettingItem compatKey="legacy" title="托盘菜单显示节点信息" divider>
               <Switch
                 size="sm"
                 isSelected={proxyInTray}
@@ -148,7 +223,26 @@ const AppearanceConfig: React.FC = () => {
                 }}
               />
             </SettingItem>
+            {proxyInTray && (
+              <SettingItem compatKey="legacy" title="托盘菜单节点延迟显示方式" divider>
+                <Tabs
+                  size="sm"
+                  color="primary"
+                  selectedKey={trayProxyDelayLayout}
+                  onSelectionChange={async (v) => {
+                    await patchAppConfig({
+                      trayProxyDelayLayout: v as 'same-line' | 'new-line'
+                    })
+                    window.electron.ipcRenderer.send('updateTrayMenu')
+                  }}
+                >
+                  <Tab key="same-line" title="同一行" />
+                  <Tab key="new-line" title="换行" />
+                </Tabs>
+              </SettingItem>
+            )}
             <SettingItem
+              compatKey="legacy"
               title={`${platform === 'win32' ? '任务栏' : '状态栏'}显示网速信息`}
               divider
             >
@@ -165,7 +259,7 @@ const AppearanceConfig: React.FC = () => {
         )}
         {platform === 'darwin' && (
           <>
-            <SettingItem title="显示 Dock 图标" divider>
+            <SettingItem compatKey="legacy" title="显示 Dock 图标" divider>
               <Switch
                 size="sm"
                 isSelected={useDockIcon}
@@ -177,7 +271,7 @@ const AppearanceConfig: React.FC = () => {
             </SettingItem>
           </>
         )}
-        <SettingItem title="使用系统标题栏" divider>
+        <SettingItem compatKey="legacy" title="使用系统标题栏" divider>
           <Switch
             size="sm"
             isSelected={useWindowFrame}
@@ -187,7 +281,39 @@ const AppearanceConfig: React.FC = () => {
             }}
           />
         </SettingItem>
-        <SettingItem title="背景色" divider>
+        {useWindowFrame && (
+          <SettingItem
+            compatKey="legacy"
+            title="启用窗口拖动区域"
+            actions={
+              <Tooltip content="让应用内页面标题的空白区域可用于拖动窗口，适用于系统未提供可拖动标题栏的环境。">
+                <Button isIconOnly size="sm" variant="light">
+                  <IoIosHelpCircle className="text-lg" />
+                </Button>
+              </Tooltip>
+            }
+            divider
+          >
+            <Switch
+              size="sm"
+              isSelected={enableWindowDrag}
+              onValueChange={async (v) => {
+                await patchAppConfig({ enableWindowDrag: v })
+                await relaunchApp()
+              }}
+            />
+          </SettingItem>
+        )}
+        <SettingItem compatKey="legacy" title="显示更新按钮" divider>
+          <Switch
+            size="sm"
+            isSelected={showUpdateButtonAfterNotification}
+            onValueChange={(v) => {
+              patchAppConfig({ showUpdateButtonAfterNotification: v })
+            }}
+          />
+        </SettingItem>
+        <SettingItem compatKey="legacy" title="背景色" divider>
           <Tabs
             size="sm"
             color="primary"
@@ -203,6 +329,7 @@ const AppearanceConfig: React.FC = () => {
           </Tabs>
         </SettingItem>
         <SettingItem
+          compatKey="legacy"
           title="主题"
           actions={
             <>
@@ -210,7 +337,6 @@ const AppearanceConfig: React.FC = () => {
                 size="sm"
                 isLoading={fetching}
                 isIconOnly
-                title="拉取主题"
                 variant="light"
                 onPress={async () => {
                   setFetching(true)
@@ -218,7 +344,7 @@ const AppearanceConfig: React.FC = () => {
                     await fetchThemes()
                     setCustomThemes(await resolveThemes())
                   } catch (e) {
-                    alert(e)
+                    notify(e, { variant: 'danger' })
                   } finally {
                     setFetching(false)
                   }
@@ -229,7 +355,6 @@ const AppearanceConfig: React.FC = () => {
               <Button
                 size="sm"
                 isIconOnly
-                title="导入主题"
                 variant="light"
                 onPress={async () => {
                   const files = await getFilePath(['css'])
@@ -238,7 +363,7 @@ const AppearanceConfig: React.FC = () => {
                     await importThemes(files)
                     setCustomThemes(await resolveThemes())
                   } catch (e) {
-                    alert(e)
+                    notify(e, { variant: 'danger' })
                   }
                 }}
               >
@@ -247,7 +372,6 @@ const AppearanceConfig: React.FC = () => {
               <Button
                 size="sm"
                 isIconOnly
-                title="编辑主题"
                 variant="light"
                 onPress={async () => {
                   setOpenCSSEditor(true)
@@ -260,6 +384,7 @@ const AppearanceConfig: React.FC = () => {
         >
           {customThemes && (
             <Select
+              aria-label="自定义主题"
               classNames={{ trigger: 'data-[hover=true]:bg-default-200' }}
               className="w-[60%]"
               size="sm"
@@ -269,7 +394,7 @@ const AppearanceConfig: React.FC = () => {
                 try {
                   await patchAppConfig({ customTheme: v.currentKey as string })
                 } catch (e) {
-                  alert(e)
+                  notify(e, { variant: 'danger' })
                 }
               }}
             >

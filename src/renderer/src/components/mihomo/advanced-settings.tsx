@@ -3,7 +3,7 @@ import SettingCard from '../base/base-setting-card'
 import SettingItem from '../base/base-setting-item'
 import InterfaceSelect from '../base/interface-select'
 import { restartCore } from '@renderer/utils/ipc'
-import { Button, Input, Select, SelectItem, Switch, Tab, Tabs, Tooltip } from '@heroui/react'
+import { Button, Input, Switch, Tab, Tabs, Tooltip } from '@heroui/react'
 import { useState } from 'react'
 import { IoIosHelpCircle } from 'react-icons/io'
 
@@ -15,7 +15,6 @@ const AdvancedSetting: React.FC = () => {
     'disable-keep-alive': disableKeepAlive = false,
     'find-process-mode': findProcessMode = 'always',
     'interface-name': interfaceName = '',
-    'global-client-fingerprint': globalClientFingerprint = '',
     'keep-alive-idle': idle = 15,
     'keep-alive-interval': interval = 15,
     profile = {},
@@ -33,8 +32,8 @@ const AdvancedSetting: React.FC = () => {
   }
 
   return (
-    <SettingCard title="高级设置">
-      <SettingItem title="查找进程" divider>
+    <SettingCard header="高级设置">
+      <SettingItem compatKey="legacy" title="查找进程" divider>
         <Tabs
           size="sm"
           color="primary"
@@ -48,7 +47,7 @@ const AdvancedSetting: React.FC = () => {
           <Tab key="always" title="开启"></Tab>
         </Tabs>
       </SettingItem>
-      <SettingItem title="存储选择节点" divider>
+      <SettingItem compatKey="legacy" title="存储选择节点" divider>
         <Switch
           size="sm"
           isSelected={storeSelected}
@@ -57,7 +56,7 @@ const AdvancedSetting: React.FC = () => {
           }}
         />
       </SettingItem>
-      <SettingItem title="存储 FakeIP" divider>
+      <SettingItem compatKey="legacy" title="存储 FakeIP" divider>
         <Switch
           size="sm"
           isSelected={storeFakeIp}
@@ -67,6 +66,7 @@ const AdvancedSetting: React.FC = () => {
         />
       </SettingItem>
       <SettingItem
+        compatKey="legacy"
         title="使用 RTT 延迟测试"
         actions={
           <Tooltip content="开启后会使用统一延迟测试来获取节点延迟，以消除不同节点握手时间的影响">
@@ -86,6 +86,7 @@ const AdvancedSetting: React.FC = () => {
         />
       </SettingItem>
       <SettingItem
+        compatKey="legacy"
         title="TCP 并发"
         actions={
           <Tooltip content="对 dns 解析出的多个 IP 地址进行 TCP 并发连接，使用握手时间最短的连接">
@@ -104,7 +105,7 @@ const AdvancedSetting: React.FC = () => {
           }}
         />
       </SettingItem>
-      <SettingItem title="禁用 TCP Keep Alive" divider>
+      <SettingItem compatKey="legacy" title="禁用 TCP Keep Alive" divider>
         <Switch
           size="sm"
           isSelected={disableKeepAlive}
@@ -113,7 +114,7 @@ const AdvancedSetting: React.FC = () => {
           }}
         />
       </SettingItem>
-      <SettingItem title="TCP Keep Alive 间隔" divider>
+      <SettingItem compatKey="legacy" title="TCP Keep Alive 间隔" divider>
         <div className="flex">
           {intervalInput !== interval && (
             <Button
@@ -130,7 +131,7 @@ const AdvancedSetting: React.FC = () => {
           <Input
             size="sm"
             type="number"
-            className="w-[100px]"
+            className="w-25"
             value={intervalInput.toString()}
             min={0}
             onValueChange={(v) => {
@@ -139,7 +140,7 @@ const AdvancedSetting: React.FC = () => {
           />
         </div>
       </SettingItem>
-      <SettingItem title="TCP Keep Alive 空闲" divider>
+      <SettingItem compatKey="legacy" title="TCP Keep Alive 空闲" divider>
         <div className="flex">
           {idleInput !== idle && (
             <Button
@@ -156,7 +157,7 @@ const AdvancedSetting: React.FC = () => {
           <Input
             size="sm"
             type="number"
-            className="w-[100px]"
+            className="w-25"
             value={idleInput.toString()}
             min={0}
             onValueChange={(v) => {
@@ -165,29 +166,7 @@ const AdvancedSetting: React.FC = () => {
           />
         </div>
       </SettingItem>
-      <SettingItem title="uTLS 指纹" divider>
-        <Select
-          size="sm"
-          className="w-[150px]"
-          selectedKeys={new Set([globalClientFingerprint])}
-          disallowEmptySelection={true}
-          onSelectionChange={(v) => {
-            onChangeNeedRestart({ 'global-client-fingerprint': v.currentKey as Fingerprints })
-          }}
-        >
-          <SelectItem key="">禁用</SelectItem>
-          <SelectItem key="random">随机</SelectItem>
-          <SelectItem key="chrome">Chrome</SelectItem>
-          <SelectItem key="firefox">Firefox</SelectItem>
-          <SelectItem key="safari">Safari</SelectItem>
-          <SelectItem key="ios">iOS</SelectItem>
-          <SelectItem key="android">Android</SelectItem>
-          <SelectItem key="edge">Edge</SelectItem>
-          <SelectItem key="360">360</SelectItem>
-          <SelectItem key="qq">QQ</SelectItem>
-        </Select>
-      </SettingItem>
-      <SettingItem title="指定出站接口">
+      <SettingItem compatKey="legacy" title="指定出站接口">
         <InterfaceSelect
           value={interfaceName}
           exclude={[device, 'lo']}

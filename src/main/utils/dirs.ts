@@ -4,7 +4,12 @@ import { app } from 'electron'
 import path from 'path'
 import { execSync } from 'child_process'
 import { getAppConfigSync } from '../config/app'
-import { checkCorePermissionSync } from '../core/manager'
+import { checkCorePermissionPathSync } from '../core/permission-check'
+import {
+  systemCoreDefaultPath,
+  systemCoreOnlyBuild,
+  systemServicePath
+} from '../../shared/build-flags'
 
 export const homeDir = app.getPath('home')
 
@@ -30,6 +35,18 @@ export function taskDir(): string {
 
 export function subStoreDir(): string {
   return path.join(dataDir(), 'substore')
+}
+
+export function subStoreFrontendDir(): string {
+  return path.join(subStoreDir(), 'sub-store-frontend')
+}
+
+export function subStoreBackendPath(): string {
+  return path.join(subStoreDir(), 'sub-store.bundle.js')
+}
+
+export function subStoreTempDir(): string {
+  return path.join(subStoreDir(), 'temp')
 }
 
 export function exeDir(): string {
@@ -68,7 +85,7 @@ export function mihomoIpcPath(): string {
   if (core === 'system') {
     return '/tmp/sparkle-mihomo-external.sock'
   }
-  if (!checkCorePermissionSync(core as 'mihomo' | 'mihomo-alpha')) {
+  if (!checkCorePermissionPathSync(mihomoCorePath(core))) {
     return '/tmp/sparkle-mihomo-api-noperm.sock'
   }
   return '/tmp/sparkle-mihomo-api.sock'
@@ -82,6 +99,9 @@ export function serviceIpcPath(): string {
 }
 
 export function mihomoCoreDir(): string {
+  if (systemCoreOnlyBuild) {
+    return path.dirname(systemCorePath())
+  }
   return path.join(resourcesDir(), 'sidecar')
 }
 
@@ -103,12 +123,17 @@ export function mihomoCorePath(core: string): string {
 
 function systemCorePath(): string {
   const { systemCorePath = '' } = getAppConfigSync()
-  return systemCorePath
+  return systemCorePath || systemCoreDefaultPath
 }
 
 export function servicePath(): string {
+  if (systemCoreOnlyBuild) return systemServicePath
   const isWin = process.platform === 'win32'
   return path.join(resourcesFilesDir(), `sparkle-service${isWin ? '.exe' : ''}`)
+}
+
+export function serviceAuthStorePath(): string {
+  return path.join(dataDir(), 'service-auth.json')
 }
 
 export function appConfigPath(): string {
@@ -167,16 +192,26 @@ export function logDir(): string {
   return path.join(dataDir(), 'logs')
 }
 
-export function logPath(): string {
+function datedLogPath(prefix?: string): string {
   const date = new Date()
   const name = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
-  return path.join(logDir(), `${name}.log`)
+  return path.join(logDir(), `${prefix ? `${prefix}-` : ''}${name}.log`)
+}
+
+export function logPath(): string {
+  return datedLogPath()
+}
+
+export function appLogPath(): string {
+  return datedLogPath('app')
+}
+
+export function coreLogPath(): string {
+  return datedLogPath('core')
 }
 
 export function substoreLogPath(): string {
-  const date = new Date()
-  const name = `sub-store-${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
-  return path.join(logDir(), `${name}.log`)
+  return datedLogPath('sub-store')
 }
 
 function hasCommand(command: string): boolean {
@@ -197,10 +232,17 @@ export function findSystemMihomo(): string[] {
   const foundPaths: string[] = []
   const searchNames = ['mihomo', 'clash']
 
+  if (systemCoreDefaultPath && existsSync(systemCoreDefaultPath)) {
+    foundPaths.push(systemCoreDefaultPath)
+  }
+
   for (const name of searchNames) {
     try {
       const command = isWin ? 'where' : 'which'
-      const result = execSync(`${command} ${name}`, { encoding: 'utf8' }).trim()
+      const result = execSync(`${command} ${name}`, {
+        encoding: 'utf8',
+        stdio: 'pipe'
+      }).trim()
       if (result) {
         const paths = result.split('\n').filter((p) => p && existsSync(p))
         for (const p of paths) {
@@ -219,6 +261,7 @@ export function findSystemMihomo(): string[] {
       '/bin',
       '/usr/bin',
       '/usr/local/bin',
+      '/opt/homebrew/bin',
       path.join(homeDir, '.local/bin'),
       path.join(homeDir, 'bin')
     ]

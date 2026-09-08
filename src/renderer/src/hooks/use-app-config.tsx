@@ -1,11 +1,12 @@
 import React, { createContext, useContext, ReactNode } from 'react'
 import useSWR from 'swr'
 import { getAppConfig, patchAppConfig as patch } from '@renderer/utils/ipc'
+import { notify } from '@renderer/utils/notification'
 
 interface AppConfigContextType {
   appConfig: AppConfig | undefined
   mutateAppConfig: () => void
-  patchAppConfig: (value: Partial<AppConfig>) => Promise<void>
+  patchAppConfig: (value: Partial<AppConfig>) => Promise<AppConfig | undefined>
 }
 
 const AppConfigContext = createContext<AppConfigContextType | undefined>(undefined)
@@ -13,11 +14,14 @@ const AppConfigContext = createContext<AppConfigContextType | undefined>(undefin
 export const AppConfigProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { data: appConfig, mutate: mutateAppConfig } = useSWR('getConfig', () => getAppConfig())
 
-  const patchAppConfig = async (value: Partial<AppConfig>): Promise<void> => {
+  const patchAppConfig = async (value: Partial<AppConfig>): Promise<AppConfig | undefined> => {
     try {
-      await patch(value)
+      const nextConfig = await patch(value)
+      mutateAppConfig(nextConfig, false)
+      return nextConfig
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
+      return undefined
     } finally {
       mutateAppConfig()
     }

@@ -14,8 +14,13 @@ import { OverrideConfigProvider } from './hooks/use-override-config'
 import { ProfileConfigProvider } from './hooks/use-profile-config'
 import { RulesProvider } from './hooks/use-rules'
 import { GroupsProvider } from './hooks/use-groups'
+import AppNotificationProvider from './components/base/app-notification-provider'
 
 let F12Count = 0
+
+if (!window.location.hash) {
+  window.history.replaceState(null, '', '#/proxies')
+}
 
 init().then(() => {
   document.addEventListener('keydown', (e) => {
@@ -46,6 +51,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
     <HeroUIProvider>
       <NextThemesProvider attribute="class" enableSystem defaultTheme="dark">
+        <AppNotificationProvider />
         <BaseErrorBoundary>
           <HashRouter>
             <AppConfigProvider>

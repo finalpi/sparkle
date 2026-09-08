@@ -11,9 +11,23 @@ module.exports = [
   ...configs.recommended,
 
   {
-    files: ['**/*.{js,jsx,ts,tsx}'],
+    rules: {
+      'preserve-caught-error': 'off',
+      'no-constant-binary-expression': 'error',
+      'no-constructor-return': 'error',
+      'no-promise-executor-return': 'error',
+      'no-self-compare': 'error',
+      'no-template-curly-in-string': 'error',
+      'no-unmodified-loop-condition': 'error',
+      'no-unreachable-loop': 'error',
+      'no-useless-assignment': 'error'
+    }
+  },
+
+  {
+    files: ['src/renderer/src/**/*.{jsx,tsx}'],
     plugins: {
-      react: react
+      react
     },
     rules: {
       ...react.configs.recommended.rules,
@@ -21,7 +35,7 @@ module.exports = [
     },
     settings: {
       react: {
-        version: 'detect'
+        version: '19.2.4'
       }
     },
     languageOptions: {
@@ -39,9 +53,18 @@ module.exports = [
   {
     files: ['**/*.{ts,tsx}'],
     rules: {
-      '@typescript-eslint/no-unused-vars': 0,
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          caughtErrors: 'none',
+          destructuredArrayIgnorePattern: '^_',
+          ignoreRestSiblings: true,
+          varsIgnorePattern: '^_'
+        }
+      ],
       '@typescript-eslint/explicit-function-return-type': 'off',
-      '@typescript-eslint/no-explicit-any': 'warn'
+      '@typescript-eslint/no-explicit-any': 'error'
     }
   }
 ]

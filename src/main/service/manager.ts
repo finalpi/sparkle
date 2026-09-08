@@ -1,12 +1,109 @@
 import { servicePath } from '../utils/dirs'
 import { execWithElevation } from '../utils/elevation'
-import { KeyManager } from './key'
-import { initServiceAPI, getServiceAxios, ping, test } from './api'
+import { KeyManager, type KeyPair, computeKeyId } from './key'
+import { initServiceAPI, getServiceAxios, ping, test, ServiceAPIError } from './api'
 import { getAppConfig, patchAppConfig } from '../config/app'
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import { loadServiceAuthSecret, saveServiceAuthSecret, type ServiceAuthSecret } from './auth-store'
+import { getCurrentUserSid } from '@uruhalushia/sparkle-native'
 
 let keyManager: KeyManager | null = null
+const execFilePromise = promisify(execFile)
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function parseLegacyServiceAuth(value: string): ServiceAuthSecret | null {
+  try {
+    const [publicKey, privateKey] = value.split(':')
+    if (!publicKey || !privateKey) {
+      return null
+    }
+
+    return {
+      keyId: computeKeyId(publicKey),
+      publicKey,
+      privateKey
+    }
+  } catch {
+    return null
+  }
+}
+
+async function clearLegacyServiceAuth(): Promise<void> {
+  await patchAppConfig({
+    serviceAuthKey: undefined
+  })
+}
+
+async function loadServiceAuthFromLegacyConfig(): Promise<ServiceAuthSecret | null> {
+  const config = await getAppConfig()
+  if (!config.serviceAuthKey) {
+    return null
+  }
+
+  const legacySecret = parseLegacyServiceAuth(config.serviceAuthKey)
+  if (!legacySecret) {
+    return null
+  }
+
+  await saveServiceAuthSecret(legacySecret)
+  await clearLegacyServiceAuth()
+  return legacySecret
+}
+
+async function loadAvailableServiceAuth(): Promise<ServiceAuthSecret | null> {
+  try {
+    const storedSecret = await loadServiceAuthSecret()
+    if (storedSecret) {
+      const config = await getAppConfig()
+      if (config.serviceAuthKey) {
+        await clearLegacyServiceAuth()
+      }
+      return storedSecret
+    }
+  } catch {
+    // ignore invalid auth storage and try the legacy config field
+  }
+
+  return await loadServiceAuthFromLegacyConfig()
+}
+
+function applyServiceAuthSecret(target: KeyManager, secret: ServiceAuthSecret | null): void {
+  target.clear()
+  if (secret) {
+    target.setKeyPair(secret.publicKey, secret.privateKey, secret.keyId)
+  }
+}
+
+function currentServiceAuthSecret(target: KeyManager): ServiceAuthSecret {
+  return {
+    keyId: target.getKeyID(),
+    publicKey: target.getPublicKey(),
+    privateKey: target.getPrivateKey()
+  }
+}
+
+async function ensurePersistedServiceAuth(target: KeyManager): Promise<ServiceAuthSecret> {
+  if (target.isInitialized()) {
+    return currentServiceAuthSecret(target)
+  }
+
+  const existingSecret = await loadAvailableServiceAuth()
+  if (existingSecret) {
+    applyServiceAuthSecret(target, existingSecret)
+    return existingSecret
+  }
+
+  const generatedKeyPair: KeyPair = target.generateKeyPair()
+  await saveServiceAuthSecret(generatedKeyPair)
+  await clearLegacyServiceAuth()
+  return generatedKeyPair
+}
 
 export async function initKeyManager(): Promise<KeyManager> {
   if (keyManager) {
@@ -14,26 +111,8 @@ export async function initKeyManager(): Promise<KeyManager> {
   }
 
   keyManager = new KeyManager()
-
-  const config = await getAppConfig()
-  if (config.serviceAuthKey) {
-    try {
-      const [publicKey, privateKey] = config.serviceAuthKey.split(':')
-      if (publicKey && privateKey) {
-        keyManager.setKeyPair(publicKey, privateKey)
-        initServiceAPI(keyManager)
-        return keyManager
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  const keyPair = keyManager.generateKeyPair()
-  await patchAppConfig({
-    serviceAuthKey: `${keyPair.publicKey}:${keyPair.privateKey}`
-  })
-
+  const existingSecret = await loadAvailableServiceAuth()
+  applyServiceAuthSecret(keyManager, existingSecret)
   initServiceAPI(keyManager)
   return keyManager
 }
@@ -70,6 +149,79 @@ function isUserCancelledError(error: unknown): boolean {
   )
 }
 
+interface ServiceLogEntry {
+  msg?: string
+  message?: string
+  error?: string
+  status?: {
+    state?: string
+    error?: string
+  }
+}
+
+function parseServiceLog(output: string): ServiceLogEntry | null {
+  let last: ServiceLogEntry | null = null
+  let lines: string[] = []
+
+  for (const line of output.split(/\r?\n/)) {
+    if (line.trim() === '{') {
+      lines = [line]
+      continue
+    }
+    if (lines.length === 0) continue
+
+    lines.push(line)
+    if (line.trim() !== '}') continue
+
+    try {
+      last = JSON.parse(lines.join('\n')) as ServiceLogEntry
+    } catch {
+      // ignore non-service JSON fragments from command wrappers
+    }
+    lines = []
+  }
+
+  return last
+}
+
+function serviceCommandOutput(value: unknown): string {
+  if (typeof value === 'object' && value) {
+    const output = value as { stdout?: unknown; stderr?: unknown }
+    if (output.stdout != null || output.stderr != null) {
+      return [String(output.stdout ?? ''), String(output.stderr ?? '')].join('\n')
+    }
+  }
+  return value instanceof Error ? value.message : String(value)
+}
+
+function serviceCommandErrorMessage(error: unknown): string {
+  const entry = parseServiceLog(serviceCommandOutput(error))
+  const message = entry?.msg ?? entry?.message
+  const detail = entry?.status?.error ?? entry?.error
+  if (message && detail && message !== detail) {
+    return `${message}：${detail}`
+  }
+  return detail || message || (error instanceof Error ? error.message : String(error))
+}
+
+async function getAuthorizedPrincipalArgs(): Promise<string[]> {
+  if (process.platform === 'win32') {
+    const sid = getCurrentUserSid()
+    if (!sid.startsWith('S-')) {
+      throw new Error('读取当前用户 SID 失败')
+    }
+
+    return ['--authorized-sid', sid]
+  }
+
+  const uid = process.getuid?.()
+  if (uid == null) {
+    throw new Error('读取当前用户 UID 失败')
+  }
+
+  return ['--authorized-uid', String(uid)]
+}
+
 export function exportPublicKey(): string {
   return getPublicKey()
 }
@@ -78,34 +230,49 @@ export function getAxios() {
   return getServiceAxios()
 }
 
+async function waitForServiceReady(timeoutMs = 15000): Promise<void> {
+  const startedAt = Date.now()
+  let lastError: unknown = null
+
+  while (Date.now() - startedAt < timeoutMs) {
+    try {
+      await ping()
+      await test()
+      return
+    } catch (error) {
+      lastError = error
+    }
+
+    await delay(500)
+  }
+
+  throw new Error(
+    `等待服务就绪超时：${lastError instanceof Error ? lastError.message : String(lastError)}`
+  )
+}
+
 export async function initService(): Promise<void> {
-  keyManager = null
-
-  const newKeyManager = new KeyManager()
-  const keyPair = newKeyManager.generateKeyPair()
-
-  initServiceAPI(newKeyManager)
-
-  const publicKey = keyPair.publicKey
-
+  const currentKeyManager = await initKeyManager()
+  const secret = await ensurePersistedServiceAuth(currentKeyManager)
   const execPath = servicePath()
 
   try {
-    await execWithElevation(execPath, ['service', 'init', '--public-key', publicKey])
-
-    await patchAppConfig({
-      serviceAuthKey: `${keyPair.publicKey}:${keyPair.privateKey}`
-    })
-
-    keyManager = newKeyManager
+    const principalArgs = await getAuthorizedPrincipalArgs()
+    await execWithElevation(execPath, [
+      'service',
+      'init',
+      '--public-key',
+      secret.publicKey,
+      ...principalArgs
+    ])
   } catch (error) {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务初始化失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务初始化失败：${serviceCommandErrorMessage(error)}`)
   }
 
-  await new Promise((resolve) => setTimeout(resolve, 500))
+  await waitForServiceReady()
 }
 
 export async function installService(): Promise<void> {
@@ -117,7 +284,7 @@ export async function installService(): Promise<void> {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务安装失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务安装失败：${serviceCommandErrorMessage(error)}`)
   }
 }
 
@@ -130,7 +297,7 @@ export async function uninstallService(): Promise<void> {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务卸载失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务卸载失败：${serviceCommandErrorMessage(error)}`)
   }
 }
 
@@ -143,7 +310,7 @@ export async function startService(): Promise<void> {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务启动失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务启动失败：${serviceCommandErrorMessage(error)}`)
   }
 }
 
@@ -156,7 +323,7 @@ export async function stopService(): Promise<void> {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务停止失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务停止失败：${serviceCommandErrorMessage(error)}`)
   }
 }
 
@@ -169,7 +336,7 @@ export async function restartService(): Promise<void> {
     if (isUserCancelledError(error)) {
       throw new UserCancelledError()
     }
-    throw new Error(`服务重启失败：${error instanceof Error ? error.message : String(error)}`)
+    throw new Error(`服务重启失败：${serviceCommandErrorMessage(error)}`)
   }
 }
 
@@ -177,39 +344,49 @@ export async function serviceStatus(): Promise<
   'running' | 'stopped' | 'not-installed' | 'paused' | 'unknown' | 'need-init'
 > {
   const execPath = servicePath()
-  const execFilePromise = promisify(execFile)
 
   try {
-    const { stderr } = await execFilePromise(execPath, ['service', 'status'])
-    if (stderr.includes('the service is not installed')) {
+    const { stdout, stderr } = await execFilePromise(execPath, ['service', 'status'])
+    if (parseServiceLog(`${stdout}\n${stderr}`)?.status?.state === 'not-installed') {
       return 'not-installed'
-    } else {
+    }
+    try {
+      await ping()
       try {
-        await ping()
-        try {
-          const out = await test()
-          if (out && typeof out === 'object' && 'status' in out && out.status === 'error') {
-            return 'need-init'
-          }
-          return 'running'
-        } catch (e) {
+        await test()
+        return 'running'
+      } catch (error) {
+        if (
+          error instanceof ServiceAPIError &&
+          error.status !== undefined &&
+          [401, 403, 409, 503].includes(error.status)
+        ) {
           return 'need-init'
         }
-      } catch (e) {
-        return 'stopped'
+        return 'unknown'
       }
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e)
+      if (
+        errorMsg.includes('EACCES') ||
+        errorMsg.includes('permission denied') ||
+        errorMsg.includes('access is denied')
+      ) {
+        return 'need-init'
+      }
+      return 'stopped'
     }
   } catch (error) {
+    if (parseServiceLog(serviceCommandOutput(error))?.status?.state === 'not-installed') {
+      return 'not-installed'
+    }
     return 'unknown'
   }
 }
 
 export async function testServiceConnection(): Promise<boolean> {
   try {
-    const out = await test()
-    if (out && typeof out === 'object' && 'status' in out && out.status === 'error') {
-      return false
-    }
+    await test()
     return true
   } catch {
     return false

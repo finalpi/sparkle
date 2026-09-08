@@ -8,6 +8,7 @@ import { AiOutlineGlobal } from 'react-icons/ai'
 import React from 'react'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
+import { notify } from '@renderer/utils/notification'
 
 interface Props {
   iconOnly?: boolean
@@ -49,7 +50,7 @@ const SysproxySwitcher: React.FC<Props> = (props) => {
       window.electron.ipcRenderer.send('updateFloatingWindow')
       window.electron.ipcRenderer.send('updateTrayMenu')
     } catch (e) {
-      alert(e)
+      notify(e, { variant: 'danger' })
     }
   }
 

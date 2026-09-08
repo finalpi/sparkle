@@ -8,13 +8,16 @@ import Viewer from './viewer'
 import useSWR from 'swr'
 import SettingCard from '../base/base-setting-card'
 import SettingItem from '../base/base-setting-item'
-import { Button, Chip } from '@heroui/react'
+import { Button, Chip, Divider } from '@heroui/react'
 import { IoMdRefresh } from 'react-icons/io'
 import { CgLoadbarDoc } from 'react-icons/cg'
-import { MdEditDocument } from 'react-icons/md'
+import { MdEditDocument, MdQrCode2 } from 'react-icons/md'
+import QRCodeModal from '../base/base-qrcode-modal'
 import dayjs from 'dayjs'
 import { calcTraffic } from '@renderer/utils/calc'
 import { getHash } from '@renderer/utils/hash'
+import { Meter } from '@heroui-v3/react'
+import { notify } from '@renderer/utils/notification'
 
 const ProxyProvider: React.FC = () => {
   const [showDetails, setShowDetails] = useState({
@@ -22,8 +25,10 @@ const ProxyProvider: React.FC = () => {
     path: '',
     type: '',
     title: '',
-    privderType: ''
+    providerType: '',
+    ageSecretKey: ''
   })
+  const [qrCode, setQrCode] = useState<{ name: string; url: string } | null>(null)
   useEffect(() => {
     if (showDetails.title) {
       const fetchProviderPath = async (name: string): Promise<void> => {
@@ -34,11 +39,12 @@ const ProxyProvider: React.FC = () => {
             setShowDetails((prev) => ({
               ...prev,
               show: true,
-              path: provider.path || `proxies/${getHash(provider.url || '')}`
+              path: provider.path || `proxies/${getHash(provider.url || '')}`,
+              ageSecretKey: provider['age-secret-key'] || ''
             }))
           }
         } catch {
-          setShowDetails((prev) => ({ ...prev, path: '' }))
+          setShowDetails((prev) => ({ ...prev, path: '', ageSecretKey: '' }))
         }
       }
       fetchProviderPath(showDetails.title)
@@ -51,11 +57,11 @@ const ProxyProvider: React.FC = () => {
   })
 
   useEffect(() => {
-    window.electron.ipcRenderer.on('core-started', () => {
+    const unsubscribeCoreStarted = window.electron.ipcRenderer.on('core-started', () => {
       mutate()
     })
     return (): void => {
-      window.electron.ipcRenderer.removeAllListeners('core-started')
+      unsubscribeCoreStarted()
     }
   }, [])
 
@@ -79,7 +85,7 @@ const ProxyProvider: React.FC = () => {
       await mihomoUpdateProxyProviders(name)
       mutate()
     } catch (e) {
-      new Notification(`${name} 更新失败\n${e}`)
+      notify(`${name} 更新失败\n${e}`, { variant: 'danger' })
     } finally {
       setUpdating((prev) => {
         prev[index] = false
@@ -92,20 +98,43 @@ const ProxyProvider: React.FC = () => {
     return null
   }
 
+  const onShowQrCode = async (name: string): Promise<void> => {
+    try {
+      const config = await getRuntimeConfig()
+      const provider = config?.['proxy-providers']?.[name] as ProxyProviderConfig
+      if (provider?.url) {
+        setQrCode({ name, url: provider.url })
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <SettingCard>
+      {qrCode && (
+        <QRCodeModal title={qrCode.name} url={qrCode.url} onClose={() => setQrCode(null)} />
+      )}
       {showDetails.show && (
         <Viewer
           path={showDetails.path}
           type={showDetails.type}
           title={showDetails.title}
-          privderType={showDetails.privderType}
+          providerType={showDetails.providerType}
+          ageSecretKey={showDetails.ageSecretKey || undefined}
           onClose={() =>
-            setShowDetails({ show: false, path: '', type: '', title: '', privderType: '' })
+            setShowDetails({
+              show: false,
+              path: '',
+              type: '',
+              title: '',
+              providerType: '',
+              ageSecretKey: ''
+            })
           }
         />
       )}
-      <SettingItem title="代理集合" divider>
+      <SettingItem compatKey="legacy" title="代理集合" divider>
         <Button
           size="sm"
           color="primary"
@@ -121,6 +150,7 @@ const ProxyProvider: React.FC = () => {
       {providers.map((provider, index) => (
         <Fragment key={provider.name}>
           <SettingItem
+            compatKey="legacy"
             title={provider.name}
             actions={
               <Chip className="ml-2" size="sm">
@@ -129,23 +159,30 @@ const ProxyProvider: React.FC = () => {
             }
             divider={!provider.subscriptionInfo && index !== providers.length - 1}
           >
-            <div className="flex h-[32px] leading-[32px] text-foreground-500">
+            <div className="flex h-8 leading-8 text-foreground-500">
               <div>{dayjs(provider.updatedAt).fromNow()}</div>
-              {/* <Button isIconOnly className="ml-2" size="sm">
-                <IoMdEye className="text-lg" />
-              </Button> */}
+              {provider.vehicleType === 'HTTP' && (
+                <Button
+                  isIconOnly
+                  className="ml-2"
+                  size="sm"
+                  onPress={() => onShowQrCode(provider.name)}
+                >
+                  <MdQrCode2 className="text-lg" />
+                </Button>
+              )}
               <Button
                 isIconOnly
-                title={provider.vehicleType == 'File' ? '编辑' : '查看'}
                 className="ml-2"
                 size="sm"
                 onPress={() => {
                   setShowDetails({
                     show: false,
-                    privderType: 'proxy-providers',
+                    providerType: 'proxy-providers',
                     path: provider.name,
                     type: provider.vehicleType,
-                    title: provider.name
+                    title: provider.name,
+                    ageSecretKey: ''
                   })
                 }}
               >
@@ -157,7 +194,6 @@ const ProxyProvider: React.FC = () => {
               </Button>
               <Button
                 isIconOnly
-                title="更新"
                 className="ml-2"
                 size="sm"
                 onPress={() => {
@@ -169,22 +205,35 @@ const ProxyProvider: React.FC = () => {
             </div>
           </SettingItem>
           {provider.subscriptionInfo && (
-            <SettingItem
-              divider={index !== providers.length - 1}
-              title={
-                <div className="text-foreground-500">
-                  {`${calcTraffic(
-                    provider.subscriptionInfo.Upload + provider.subscriptionInfo.Download
-                  )} / ${calcTraffic(provider.subscriptionInfo.Total)}`}
+            <>
+              <SettingItem
+                compatKey="legacy"
+                title={
+                  <div className="text-foreground-500">
+                    {`${calcTraffic(
+                      provider.subscriptionInfo.Upload + provider.subscriptionInfo.Download
+                    )} / ${calcTraffic(provider.subscriptionInfo.Total)}`}
+                  </div>
+                }
+              >
+                <div className="h-8 leading-8 text-foreground-500">
+                  {provider.subscriptionInfo.Expire
+                    ? dayjs.unix(provider.subscriptionInfo.Expire).format('YYYY-MM-DD')
+                    : '长期有效'}
                 </div>
-              }
-            >
-              <div className="h-[32px] leading-[32px] text-foreground-500">
-                {provider.subscriptionInfo.Expire
-                  ? dayjs.unix(provider.subscriptionInfo.Expire).format('YYYY-MM-DD')
-                  : '长期有效'}
-              </div>
-            </SettingItem>
+              </SettingItem>
+              <Meter
+                aria-label={`${provider.name} 流量使用`}
+                className="w-full"
+                maxValue={provider.subscriptionInfo.Total}
+                value={provider.subscriptionInfo.Upload + provider.subscriptionInfo.Download}
+              >
+                <Meter.Track>
+                  <Meter.Fill />
+                </Meter.Track>
+              </Meter>
+              {index !== providers.length - 1 && <Divider className="my-2" />}
+            </>
           )}
         </Fragment>
       ))}

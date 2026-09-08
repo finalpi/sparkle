@@ -11,6 +11,7 @@ import {
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import debounce from '@renderer/utils/debounce'
 import { isValidCron } from 'cron-validator'
+import { notify } from '@renderer/utils/notification'
 
 const SubStoreConfig: React.FC = () => {
   const { appConfig, patchAppConfig } = useAppConfig()
@@ -56,8 +57,8 @@ const SubStoreConfig: React.FC = () => {
   }, [subStoreBackendUploadCron])
 
   return (
-    <SettingCard title="Sub-Store 设置">
-      <SettingItem title="启用 Sub-Store" divider={useSubStore}>
+    <SettingCard header="Sub-Store 设置">
+      <SettingItem compatKey="legacy" title="启用 Sub-Store" divider={useSubStore}>
         <Switch
           size="sm"
           isSelected={useSubStore}
@@ -72,14 +73,14 @@ const SubStoreConfig: React.FC = () => {
                 await stopSubStoreBackendServer()
               }
             } catch (e) {
-              alert(e)
+              notify(e, { variant: 'danger' })
             }
           }}
         />
       </SettingItem>
       {useSubStore && (
         <>
-          <SettingItem title="允许局域网连接" divider>
+          <SettingItem compatKey="legacy" title="允许局域网连接" divider>
             <Switch
               size="sm"
               isSelected={subStoreHost === '0.0.0.0'}
@@ -93,12 +94,12 @@ const SubStoreConfig: React.FC = () => {
                   await startSubStoreFrontendServer()
                   await startSubStoreBackendServer()
                 } catch (e) {
-                  alert(e)
+                  notify(e, { variant: 'danger' })
                 }
               }}
             />
           </SettingItem>
-          <SettingItem title="使用自建 Sub-Store 后端" divider>
+          <SettingItem compatKey="legacy" title="使用自建 Sub-Store 后端" divider>
             <Switch
               size="sm"
               isSelected={useCustomSubStore}
@@ -111,13 +112,13 @@ const SubStoreConfig: React.FC = () => {
                     await startSubStoreBackendServer()
                   }
                 } catch (e) {
-                  alert(e)
+                  notify(e, { variant: 'danger' })
                 }
               }}
             />
           </SettingItem>
           {useCustomSubStore ? (
-            <SettingItem title="自建 Sub-Store 后端地址">
+            <SettingItem compatKey="legacy" title="自建 Sub-Store 后端地址">
               <Input
                 size="sm"
                 className="w-[60%]"
@@ -131,7 +132,7 @@ const SubStoreConfig: React.FC = () => {
             </SettingItem>
           ) : (
             <>
-              <SettingItem title="为 Sub-Store 内所有请求启用代理" divider>
+              <SettingItem compatKey="legacy" title="为 Sub-Store 内所有请求启用代理" divider>
                 <Switch
                   size="sm"
                   isSelected={useProxyInSubStore}
@@ -140,12 +141,12 @@ const SubStoreConfig: React.FC = () => {
                       await patchAppConfig({ useProxyInSubStore: v })
                       await startSubStoreBackendServer()
                     } catch (e) {
-                      alert(e)
+                      notify(e, { variant: 'danger' })
                     }
                   }}
                 />
               </SettingItem>
-              <SettingItem title="定时同步订阅/文件" divider>
+              <SettingItem compatKey="legacy" title="定时同步订阅/文件" divider>
                 <div className="flex w-[60%] gap-2">
                   {subStoreBackendSyncCronValue !== subStoreBackendSyncCron && (
                     <Button
@@ -159,9 +160,9 @@ const SubStoreConfig: React.FC = () => {
                           await patchAppConfig({
                             subStoreBackendSyncCron: subStoreBackendSyncCronValue
                           })
-                          new Notification('重启应用生效')
+                          notify('重启应用生效')
                         } else {
-                          alert('Cron 表达式无效')
+                          notify('Cron 表达式无效', { variant: 'danger' })
                         }
                       }}
                     >
@@ -178,7 +179,7 @@ const SubStoreConfig: React.FC = () => {
                   />
                 </div>
               </SettingItem>
-              <SettingItem title="定时恢复配置" divider>
+              <SettingItem compatKey="legacy" title="定时恢复配置" divider>
                 <div className="flex w-[60%] gap-2">
                   {subStoreBackendDownloadCronValue !== subStoreBackendDownloadCron && (
                     <Button
@@ -192,9 +193,9 @@ const SubStoreConfig: React.FC = () => {
                           await patchAppConfig({
                             subStoreBackendDownloadCron: subStoreBackendDownloadCronValue
                           })
-                          new Notification('重启应用生效')
+                          notify('重启应用生效')
                         } else {
-                          alert('Cron 表达式无效')
+                          notify('Cron 表达式无效', { variant: 'danger' })
                         }
                       }}
                     >
@@ -211,7 +212,7 @@ const SubStoreConfig: React.FC = () => {
                   />
                 </div>
               </SettingItem>
-              <SettingItem title="定时备份配置">
+              <SettingItem compatKey="legacy" title="定时备份配置">
                 <div className="flex w-[60%] gap-2">
                   {subStoreBackendUploadCronValue !== subStoreBackendUploadCron && (
                     <Button
@@ -225,9 +226,9 @@ const SubStoreConfig: React.FC = () => {
                           await patchAppConfig({
                             subStoreBackendUploadCron: subStoreBackendUploadCronValue
                           })
-                          new Notification('重启应用生效')
+                          notify('重启应用生效')
                         } else {
-                          alert('Cron 表达式无效')
+                          notify('Cron 表达式无效', { variant: 'danger' })
                         }
                       }}
                     >

@@ -6,10 +6,11 @@ import EditableList from '@renderer/components/base/base-list-editor'
 import PacEditorModal from '@renderer/components/sysproxy/pac-editor-modal'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import { platform } from '@renderer/utils/init'
-import { openUWPTool, triggerSysProxy } from '@renderer/utils/ipc'
+import { getAppConfig, openUWPTool, serviceStatus, triggerSysProxy } from '@renderer/utils/ipc'
 import React, { Key, useEffect, useState } from 'react'
 import ByPassEditorModal from '@renderer/components/sysproxy/bypass-editor-modal'
 import { IoIosHelpCircle } from 'react-icons/io'
+import { notify } from '@renderer/utils/notification'
 
 const defaultPacScript = `
 function FindProxyForURL(url, host) {
@@ -64,7 +65,7 @@ const Sysproxy: React.FC = () => {
             '<local>'
           ]
 
-  const { appConfig, patchAppConfig } = useAppConfig()
+  const { appConfig, patchAppConfig, mutateAppConfig } = useAppConfig()
   const { sysProxy, onlyActiveDevice = false } =
     appConfig || ({ sysProxy: { enable: false } } as AppConfig)
   const [changed, setChanged] = useState(false)
@@ -74,14 +75,26 @@ const Sysproxy: React.FC = () => {
     bypass: sysProxy.bypass ?? defaultBypass,
     mode: sysProxy.mode ?? 'manual',
     pacScript: sysProxy.pacScript ?? defaultPacScript,
-    settingMode: sysProxy.settingMode ?? 'exec'
+    settingMode: sysProxy.settingMode ?? 'exec',
+    guard: sysProxy.guard ?? false,
+    guardNotify: sysProxy.guardNotify ?? false
   })
-  useEffect(() => {
+  const syncValuesFromSysProxy = (nextSysProxy: AppConfig['sysProxy']): void => {
     originSetValues((prev) => ({
       ...prev,
-      enable: sysProxy.enable
+      enable: nextSysProxy.enable,
+      host: nextSysProxy.host ?? '',
+      bypass: nextSysProxy.bypass ?? defaultBypass,
+      mode: nextSysProxy.mode ?? 'manual',
+      pacScript: nextSysProxy.pacScript ?? defaultPacScript,
+      settingMode: nextSysProxy.settingMode ?? 'exec',
+      guard: nextSysProxy.guard ?? false,
+      guardNotify: nextSysProxy.guardNotify ?? false
     }))
-  }, [sysProxy.enable])
+  }
+  useEffect(() => {
+    syncValuesFromSysProxy(sysProxy)
+  }, [sysProxy])
   const [openEditor, setOpenEditor] = useState(false)
   const [openPacEditor, setOpenPacEditor] = useState(false)
 
@@ -89,15 +102,41 @@ const Sysproxy: React.FC = () => {
     originSetValues(v)
     setChanged(true)
   }
+
+  const normalizeServiceModeValues = async (): Promise<typeof values> => {
+    if (values.settingMode !== 'service') {
+      return values
+    }
+
+    const status = await serviceStatus().catch(() => 'unknown' as const)
+    if (status === 'running') {
+      return values
+    }
+
+    notify('服务不可用，已切换到执行命令模式')
+    const nextValues = {
+      ...values,
+      settingMode: 'exec' as const,
+      guard: false,
+      guardNotify: false
+    }
+    originSetValues(nextValues)
+    return nextValues
+  }
+
   const onSave = async (): Promise<void> => {
     // check valid TODO
-    await patchAppConfig({ sysProxy: values })
+    const nextValues = await normalizeServiceModeValues()
+    const nextConfig =
+      (await patchAppConfig({ sysProxy: nextValues })) ?? (await getAppConfig(true))
+    syncValuesFromSysProxy(nextConfig.sysProxy)
+    mutateAppConfig()
     setChanged(false)
-    if (values.enable) {
+    if (nextConfig.sysProxy.enable) {
       try {
-        await triggerSysProxy(values.enable, onlyActiveDevice)
+        await triggerSysProxy(nextConfig.sysProxy.enable, onlyActiveDevice)
       } catch (e) {
-        alert(e)
+        notify(e, { variant: 'danger' })
         await patchAppConfig({ sysProxy: { enable: false } })
       }
     }
@@ -106,6 +145,7 @@ const Sysproxy: React.FC = () => {
   return (
     <BasePage
       title="系统代理设置"
+      contentClassName="no-scrollbar"
       header={
         changed && (
           <Button color="primary" className="app-nodrag" size="sm" onPress={onSave}>
@@ -138,7 +178,7 @@ const Sysproxy: React.FC = () => {
         />
       )}
       <SettingCard className="sysproxy-settings">
-        <SettingItem title="代理主机" divider>
+        <SettingItem compatKey="legacy" title="代理主机" divider>
           <Input
             size="sm"
             className="w-[50%]"
@@ -149,7 +189,7 @@ const Sysproxy: React.FC = () => {
             }}
           />
         </SettingItem>
-        <SettingItem title="代理模式" divider>
+        <SettingItem compatKey="legacy" title="代理模式" divider>
           <Tabs
             size="sm"
             color="primary"
@@ -161,7 +201,7 @@ const Sysproxy: React.FC = () => {
           </Tabs>
         </SettingItem>
         {platform === 'win32' && (
-          <SettingItem title="UWP 工具" divider>
+          <SettingItem compatKey="legacy" title="UWP 工具" divider>
             <Button
               size="sm"
               onPress={async () => {
@@ -172,51 +212,101 @@ const Sysproxy: React.FC = () => {
             </Button>
           </SettingItem>
         )}
-        {platform == 'darwin' && (
-          <>
-            <SettingItem title="设置方式" divider>
-              <Tabs
-                size="sm"
-                color="primary"
-                selectedKey={values.settingMode}
-                onSelectionChange={(key) => {
-                  setValues({ ...values, settingMode: key as 'exec' | 'service' })
-                }}
+        <SettingItem compatKey="legacy" title="设置方式" divider>
+          <Tabs
+            size="sm"
+            color="primary"
+            selectedKey={values.settingMode}
+            onSelectionChange={(key) => {
+              const settingMode = key as 'exec' | 'service'
+              setValues({
+                ...values,
+                settingMode,
+                guard: settingMode === 'service' ? values.guard : false,
+                guardNotify: settingMode === 'service' ? values.guardNotify : false
+              })
+            }}
+          >
+            <Tab key="exec" title="执行命令" />
+            <Tab key="service" title="服务模式" />
+          </Tabs>
+        </SettingItem>
+        {platform !== 'linux' && values.settingMode === 'service' && (
+          <SettingItem
+            compatKey="legacy"
+            title="仅为活跃接口设置"
+            actions={
+              <Tooltip
+                content={
+                  <>
+                    <div>开启后，系统代理仅会为当前活跃的网络接口设置，仅服务模式下生效</div>
+                  </>
+                }
               >
-                <Tab key="exec" title="执行命令" />
-                <Tab key="service" title="服务模式" />
-              </Tabs>
-            </SettingItem>
-            <SettingItem
-              title="仅为活跃接口设置"
-              actions={
-                <Tooltip
-                  content={
-                    <>
-                      <div>开启后，系统代理仅会为当前活跃的网络接口设置，仅服务模式下生效</div>
-                    </>
-                  }
-                >
-                  <Button isIconOnly size="sm" variant="light">
-                    <IoIosHelpCircle className="text-lg" />
-                  </Button>
-                </Tooltip>
-              }
-              divider
-            >
-              <Switch
-                size="sm"
-                isSelected={onlyActiveDevice}
-                isDisabled={!values.settingMode || values.settingMode !== 'service'}
-                onValueChange={(v) => {
-                  patchAppConfig({ onlyActiveDevice: v })
-                }}
-              />
-            </SettingItem>
-          </>
+                <Button isIconOnly size="sm" variant="light">
+                  <IoIosHelpCircle className="text-lg" />
+                </Button>
+              </Tooltip>
+            }
+            divider
+          >
+            <Switch
+              size="sm"
+              isSelected={onlyActiveDevice}
+              isDisabled={!values.settingMode || values.settingMode !== 'service'}
+              onValueChange={(v) => {
+                patchAppConfig({ onlyActiveDevice: v })
+              }}
+            />
+          </SettingItem>
+        )}
+        {values.settingMode === 'service' && (
+          <SettingItem
+            compatKey="legacy"
+            title="系统代理守护"
+            actions={
+              <Tooltip content={<div>检测到系统代理被修改后自动恢复，仅服务模式下生效</div>}>
+                <Button isIconOnly size="sm" variant="light">
+                  <IoIosHelpCircle className="text-lg" />
+                </Button>
+              </Tooltip>
+            }
+            divider
+          >
+            <Switch
+              size="sm"
+              isSelected={values.guard}
+              onValueChange={(v) => {
+                setValues({ ...values, guard: v, guardNotify: v ? values.guardNotify : false })
+              }}
+            />
+          </SettingItem>
+        )}
+        {values.settingMode === 'service' && values.guard && (
+          <SettingItem
+            compatKey="legacy"
+            title="守护通知"
+            actions={
+              <Tooltip content={<div>系统代理恢复成功或失败时发送通知</div>}>
+                <Button isIconOnly size="sm" variant="light">
+                  <IoIosHelpCircle className="text-lg" />
+                </Button>
+              </Tooltip>
+            }
+            divider
+          >
+            <Switch
+              size="sm"
+              isSelected={values.guardNotify}
+              isDisabled={!values.guard}
+              onValueChange={(v) => {
+                setValues({ ...values, guardNotify: v })
+              }}
+            />
+          </SettingItem>
         )}
         {values.mode === 'auto' && (
-          <SettingItem title="代理模式">
+          <SettingItem compatKey="legacy" title="代理模式">
             <Button size="sm" onPress={() => setOpenPacEditor(true)}>
               编辑 PAC 脚本
             </Button>
@@ -224,7 +314,7 @@ const Sysproxy: React.FC = () => {
         )}
         {values.mode === 'manual' && (
           <>
-            <SettingItem title="添加默认代理绕过" divider>
+            <SettingItem compatKey="legacy" title="添加默认代理绕过" divider>
               <Button
                 size="sm"
                 onPress={() => {
@@ -237,7 +327,7 @@ const Sysproxy: React.FC = () => {
                 添加默认代理绕过
               </Button>
             </SettingItem>
-            <SettingItem title="代理绕过列表">
+            <SettingItem compatKey="legacy" title="代理绕过列表">
               <Button
                 size="sm"
                 onPress={async () => {

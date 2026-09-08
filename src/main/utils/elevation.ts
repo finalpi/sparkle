@@ -1,5 +1,10 @@
 import { execFile } from 'child_process'
 import { promisify } from 'util'
+import {
+  isRunningAsAdmin as nativeIsRunningAsAdmin,
+  runElevated
+} from '@uruhalushia/sparkle-native'
+import { systemCoreOnlyBuild, systemServicePath } from '../../shared/build-flags'
 
 const execFilePromise = promisify(execFile)
 
@@ -11,38 +16,35 @@ async function isRunningAsAdmin(): Promise<boolean> {
   }
 
   try {
-    await execFilePromise('net', ['session'], { timeout: 2000 })
-    isAdminCached = true
-    return true
+    isAdminCached = nativeIsRunningAsAdmin()
   } catch {
     isAdminCached = false
-    return false
   }
+  return isAdminCached
+}
+
+function shellQuote(arg: string): string {
+  return `'${arg.replace(/'/g, `'\\''`)}'`
+}
+
+function appleScriptQuote(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
 }
 
 export async function execWithElevation(command: string, args: string[]): Promise<void> {
+  if (systemCoreOnlyBuild && command !== systemServicePath) {
+    throw new Error('系统内核构建不支持提权操作')
+  }
+
   if (process.platform === 'win32') {
     try {
       if (await isRunningAsAdmin()) {
         await execFilePromise(command, args, { timeout: 30000 })
       } else {
-        const psArgs = args
-          .map((arg) => {
-            const escaped = arg.replace(/'/g, "''")
-            return `'${escaped}'`
-          })
-          .join(',')
-        await execFilePromise(
-          'powershell.exe',
-          [
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-Command',
-            `& { $p = Start-Process -FilePath '${command}' -ArgumentList @(${psArgs}) -Verb RunAs -WindowStyle Hidden -PassThru -Wait; exit $p.ExitCode }`
-          ],
-          { timeout: 30000 }
-        )
+        const exitCode = runElevated(command, args)
+        if (exitCode !== 0) {
+          throw new Error(`exit code ${exitCode}`)
+        }
       }
     } catch (error) {
       throw new Error(
@@ -58,11 +60,11 @@ export async function execWithElevation(command: string, args: string[]): Promis
       )
     }
   } else if (process.platform === 'darwin') {
-    const cmd = `${command} ${args.join(' ')}`
+    const cmd = [command, ...args].map(shellQuote).join(' ')
     try {
       await execFilePromise('osascript', [
         '-e',
-        `do shell script "${cmd}" with administrator privileges`
+        `do shell script "${appleScriptQuote(cmd)}" with administrator privileges`
       ])
     } catch (error) {
       throw new Error(

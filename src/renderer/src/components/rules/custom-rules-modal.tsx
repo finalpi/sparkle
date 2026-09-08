@@ -1,3 +1,4 @@
+/* eslint-disable react/prop-types */
 import {
   Button,
   Modal,
@@ -263,7 +264,9 @@ const CustomRulesModal: React.FC<Props> = ({ isOpen, onClose, onSuccess }) => {
       console.log('核心已重启')
       
       // 等待一小段时间确保核心完全启动
-      await new Promise(resolve => setTimeout(resolve, 500))
+      await new Promise((resolve) => {
+        setTimeout(resolve, 500)
+      })
       
       // 通知父组件刷新规则列表
       onSuccess?.()

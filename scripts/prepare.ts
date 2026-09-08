@@ -1,14 +1,14 @@
-/* eslint-disable @typescript-eslint/explicit-function-return-type */
 import fs from 'fs'
 import AdmZip from 'adm-zip'
 import path from 'path'
 import zlib from 'zlib'
 import { extract } from 'tar'
 import { execSync } from 'child_process'
+import { systemCoreOnlyBuild } from './build-env.ts'
 
 const cwd = process.cwd()
 const TEMP_DIR = path.join(cwd, 'node_modules/.temp')
-let arch = process.arch
+let arch: string = process.arch
 const platform = process.platform
 if (process.argv.slice(2).length !== 0) {
   arch = process.argv.slice(2)[0].replace('--', '')
@@ -19,11 +19,20 @@ if (process.env.SKIP_PREPARE === '1') {
   process.exit(0)
 }
 
+if (systemCoreOnlyBuild) {
+  console.log('[INFO]: System-core-only build: external resources are provided by subpackages')
+  process.exit(0)
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /* ======= mihomo alpha======= */
 const MIHOMO_ALPHA_VERSION_URL =
   'https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha/version.txt'
 const MIHOMO_ALPHA_URL_PREFIX = `https://github.com/MetaCubeX/mihomo/releases/download/Prerelease-Alpha`
-let MIHOMO_ALPHA_VERSION
+let MIHOMO_ALPHA_VERSION: string
 
 const MIHOMO_ALPHA_MAP = {
   'win32-x64': 'mihomo-windows-amd64-v3',
@@ -42,11 +51,11 @@ async function getLatestAlphaVersion() {
     const response = await fetch(MIHOMO_ALPHA_VERSION_URL, {
       method: 'GET'
     })
-    let v = await response.text()
+    const v = await response.text()
     MIHOMO_ALPHA_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest alpha version: ${MIHOMO_ALPHA_VERSION}`)
   } catch (error) {
-    console.error('Error fetching latest alpha version:', error.message)
+    console.error('Error fetching latest alpha version:', getErrorMessage(error))
     process.exit(1)
   }
 }
@@ -55,7 +64,7 @@ async function getLatestAlphaVersion() {
 const MIHOMO_VERSION_URL =
   'https://github.com/MetaCubeX/mihomo/releases/latest/download/version.txt'
 const MIHOMO_URL_PREFIX = `https://github.com/MetaCubeX/mihomo/releases/download`
-let MIHOMO_VERSION
+let MIHOMO_VERSION: string
 
 const MIHOMO_MAP = {
   'win32-x64': 'mihomo-windows-amd64-v3',
@@ -74,11 +83,11 @@ async function getLatestReleaseVersion() {
     const response = await fetch(MIHOMO_VERSION_URL, {
       method: 'GET'
     })
-    let v = await response.text()
+    const v = await response.text()
     MIHOMO_VERSION = v.trim() // Trim to remove extra whitespaces
     console.log(`Latest release version: ${MIHOMO_VERSION}`)
   } catch (error) {
-    console.error('Error fetching latest release version:', error.message)
+    console.error('Error fetching latest release version:', getErrorMessage(error))
     process.exit(1)
   }
 }
@@ -130,10 +139,24 @@ function mihomo() {
     downloadURL
   }
 }
+interface SidecarInfo {
+  name: string
+  targetFile: string
+  zipFile: string
+  exeFile: string
+  downloadURL: string
+}
+
+interface ResourceInfo {
+  file: string
+  downloadURL: string
+  needExecutable?: boolean
+}
+
 /**
  * download sidecar and rename
  */
-async function resolveSidecar(binInfo) {
+async function resolveSidecar(binInfo: SidecarInfo) {
   const { name, targetFile, zipFile, exeFile, downloadURL } = binInfo
 
   const sidecarDir = path.join(cwd, 'extra', 'sidecar')
@@ -184,9 +207,9 @@ async function resolveSidecar(binInfo) {
       // gz
       const readStream = fs.createReadStream(tempZip)
       const writeStream = fs.createWriteStream(sidecarPath)
-      await new Promise((resolve, reject) => {
-        const onError = (error) => {
-          console.error(`[ERROR]: "${name}" gz failed:`, error.message)
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: unknown) => {
+          console.error(`[ERROR]: "${name}" gz failed:`, getErrorMessage(error))
           reject(error)
         }
         readStream
@@ -213,7 +236,7 @@ async function resolveSidecar(binInfo) {
 /**
  * download the file to the extra dir
  */
-async function resolveResource(binInfo) {
+async function resolveResource(binInfo: ResourceInfo) {
   const { file, downloadURL, needExecutable = false } = binInfo
 
   const resDir = path.join(cwd, 'extra', 'files')
@@ -237,7 +260,7 @@ async function resolveResource(binInfo) {
 /**
  * download file and save to `path`
  */
-async function downloadFile(url, path) {
+async function downloadFile(url: string | URL | Request, path: fs.PathOrFileDescriptor) {
   const response = await fetch(url, {
     method: 'GET',
     headers: { 'Content-Type': 'application/octet-stream' }
@@ -273,6 +296,11 @@ const resolveASN = () =>
     file: 'ASN.mmdb',
     downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/GeoLite2-ASN.mmdb`
   })
+const resolveBundleMRS = () =>
+  resolveResource({
+    file: 'BundleMRS.7z',
+    downloadURL: `https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/BundleMRS.7z`
+  })
 const resolveEnableLoopback = () =>
   resolveResource({
     file: 'enableLoopback.exe',
@@ -297,7 +325,7 @@ const resolveSparkleService = () => {
 
   return resolveResource({
     file: `sparkle-service${ext}`,
-    downloadURL: `https://github.com/xishang0128/sparkle-service/releases/download/pre-release/${base}${ext}`,
+    downloadURL: `https://github.com/UruhaLushia/sparkle-service/releases/download/pre-release/${base}${ext}`,
     needExecutable: true
   })
 }
@@ -376,7 +404,7 @@ const resolveSubstoreFrontend = async () => {
       fixPermissions(targetPath)
       console.log(`[INFO]: sub-store-frontend permissions fixed`)
     } catch (error) {
-      console.warn(`[WARN]: Failed to fix permissions: ${error.message}`)
+      console.warn(`[WARN]: Failed to fix permissions: ${getErrorMessage(error)}`)
     }
   }
 
@@ -398,7 +426,16 @@ const resolveFont = async () => {
   console.log(`[INFO]: twemoji.ttf finished`)
 }
 
-const tasks = [
+type Task = {
+  name: string
+  func: () => Promise<void>
+  retry: number
+  winOnly?: boolean
+  linuxOnly?: boolean
+  unixOnly?: boolean
+}
+
+const tasks: Task[] = [
   {
     name: 'mihomo-alpha',
     func: () => getLatestAlphaVersion().then(() => resolveSidecar(MihomoAlpha())),
@@ -414,6 +451,7 @@ const tasks = [
   { name: 'geosite', func: resolveGeosite, retry: 5 },
   { name: 'geoip', func: resolveGeoIP, retry: 5 },
   { name: 'asn', func: resolveASN, retry: 5 },
+  { name: 'bundlemrs', func: resolveBundleMRS, retry: 5 },
   {
     name: 'font',
     func: resolveFont,
@@ -472,7 +510,7 @@ async function runTask() {
       await task.func()
       break
     } catch (err) {
-      console.error(`[ERROR]: task::${task.name} try ${i} ==`, err.message)
+      console.error(`[ERROR]: task::${task.name} try ${i} ==`, getErrorMessage(err))
       if (i === task.retry - 1) throw err
     }
   }

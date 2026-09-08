@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Button, ScrollShadow, Chip, Accordion, AccordionItem } from '@heroui/react'
 import { IoRefresh, IoClose, IoCheckmarkCircle } from 'react-icons/io5'
 import { useGroups } from './hooks/use-groups'
-import { mihomoChangeProxy, mihomoGroupDelay, mihomoCloseAllConnections } from './utils/ipc'
+import { mihomoChangeProxy, mihomoGroupDelay, mihomoCloseConnections } from './utils/ipc'
 import { useAppConfig } from './hooks/use-app-config'
 import { calcTraffic } from './utils/calc'
 
@@ -52,7 +52,7 @@ const TrayMenuApp: React.FC = () => {
     try {
       await mihomoChangeProxy(groupName, proxyName)
       if (autoCloseConnection) {
-        await mihomoCloseAllConnections()
+        await mihomoCloseConnections()
       }
       mutate()
     } catch (e) {
@@ -181,7 +181,7 @@ const TrayMenuApp: React.FC = () => {
                         size="sm"
                         color={getDelayColor(getCurrentDelay(group))}
                         variant="flat"
-                        className="text-[10px] h-5 min-w-[52px]"
+                        className="text-[10px] h-5 min-w-13"
                       >
                         {formatDelay(getCurrentDelay(group))}
                       </Chip>
@@ -205,7 +205,7 @@ const TrayMenuApp: React.FC = () => {
                       >
                         <div className="flex items-center gap-2 flex-1 min-w-0">
                           {isActive && (
-                            <IoCheckmarkCircle className="text-primary text-sm flex-shrink-0" />
+                            <IoCheckmarkCircle className="text-primary text-sm shrink-0" />
                           )}
                           <span
                             className={`text-xs truncate ${isActive ? 'text-primary font-medium' : ''}`}
@@ -217,7 +217,7 @@ const TrayMenuApp: React.FC = () => {
                           size="sm"
                           color={getDelayColor(delay)}
                           variant="flat"
-                          className="text-[10px] h-4 min-w-[48px] flex-shrink-0"
+                          className="text-[10px] h-4 min-w-12 shrink-0"
                         >
                           {formatDelay(delay)}
                         </Chip>
