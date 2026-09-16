@@ -21,7 +21,10 @@ import ConnectionSettingDrawer from '@renderer/components/connections/connection
 import ConnectionGroupHeader from '@renderer/components/connections/connection-group-header'
 import {
   buildConnectionGroups,
-  type ConnectionGroup
+  mergeConnectionGroupSummaries,
+  summarizeConnectionGroups,
+  type ConnectionGroup,
+  type ConnectionGroupSummary
 } from '@renderer/components/connections/connection-groups'
 import { CgClose, CgTrash } from 'react-icons/cg'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
@@ -42,6 +45,10 @@ import {
 } from '@renderer/utils/connection-filter-autocomplete'
 
 let cachedConnections: ControllerConnectionDetail[] = []
+let cachedEvictedConnectionGroups: ConnectionGroupSummary[] = []
+let cachedCoreTotals: Pick<ControllerConnections, 'uploadTotal' | 'downloadTotal'> | null = null
+
+const CLOSED_CONNECTION_DETAIL_LIMIT = 200
 
 const Connections: React.FC = () => {
   const { controledMihomoConfig } = useControledMihomoConfig()
@@ -63,6 +70,9 @@ const Connections: React.FC = () => {
     useState<ControllerConnectionDetail[]>(cachedConnections)
   const [activeConnections, setActiveConnections] = useState<ControllerConnectionDetail[]>([])
   const [closedConnections, setClosedConnections] = useState<ControllerConnectionDetail[]>([])
+  const [evictedConnectionGroups, setEvictedConnectionGroups] = useState<ConnectionGroupSummary[]>(
+    cachedEvictedConnectionGroups
+  )
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false)
   const [isSettingDrawerOpen, setIsSettingDrawerOpen] = useState(false)
   const [settingDrawerReopenSignal, setSettingDrawerReopenSignal] = useState(0)
@@ -96,6 +106,7 @@ const Connections: React.FC = () => {
   const appNameCacheRef = useRef<Record<string, string>>({})
 
   const lastActiveTime = useRef<Map<string, number>>(new Map())
+  const lastConnectionsUpdateAt = useRef<number | null>(null)
   const [isFilterFocused, setIsFilterFocused] = useState(false)
   const [filterCursor, setFilterCursor] = useState(0)
   const [filterScrollLeft, setFilterScrollLeft] = useState(0)
@@ -193,9 +204,18 @@ const Connections: React.FC = () => {
     return buildConnectionGroups(
       filteredConnections,
       connectionGroupSort,
-      connectionGroupDirection === 'asc'
+      connectionGroupDirection === 'asc',
+      tab === 'closed' && filter === '' ? evictedConnectionGroups : []
     )
-  }, [grouped, filteredConnections, connectionGroupSort, connectionGroupDirection])
+  }, [
+    grouped,
+    filteredConnections,
+    connectionGroupSort,
+    connectionGroupDirection,
+    tab,
+    filter,
+    evictedConnectionGroups
+  ])
 
   const { groupCounts, flatMembers, flatMemberLocalIndex } = useMemo(() => {
     const counts: number[] = []
@@ -243,6 +263,8 @@ const Connections: React.FC = () => {
   appNameCacheRef.current = appNameCache
 
   const trashAllClosedConnection = useCallback((): void => {
+    cachedEvictedConnectionGroups = []
+    setEvictedConnectionGroups([])
     setClosedConnections((closedConns) => {
       if (closedConns.length === 0) return closedConns
       const trashIds = new Set(closedConns.map((conn) => conn.id))
@@ -310,6 +332,12 @@ const Connections: React.FC = () => {
   const closeGroup = useCallback((key: string): void => {
     const group = connectionGroupsRef.current.find((g) => g.key === key)
     if (!group) return
+    if (tabRef.current === 'closed') {
+      cachedEvictedConnectionGroups = cachedEvictedConnectionGroups.filter(
+        (summary) => summary.key !== key
+      )
+      setEvictedConnectionGroups(cachedEvictedConnectionGroups)
+    }
     const close = closeConnectionRef.current
     group.connections.forEach((conn) => close(conn.id))
   }, [])
@@ -321,11 +349,36 @@ const Connections: React.FC = () => {
 
       if (!info.connections) return
 
+      const coreRestarted =
+        cachedCoreTotals !== null &&
+        (info.uploadTotal < cachedCoreTotals.uploadTotal ||
+          info.downloadTotal < cachedCoreTotals.downloadTotal)
+      cachedCoreTotals = {
+        uploadTotal: info.uploadTotal,
+        downloadTotal: info.downloadTotal
+      }
+
+      if (coreRestarted) {
+        cachedConnections = []
+        cachedEvictedConnectionGroups = []
+        allConnectionsRef.current = []
+        activeConnectionsRef.current = []
+        deletedIdsRef.current = new Set()
+        lastActiveTime.current.clear()
+        setAllConnections([])
+        setActiveConnections([])
+        setClosedConnections([])
+        setEvictedConnectionGroups([])
+        setDeletedIds(new Set())
+        lastConnectionsUpdateAt.current = null
+      }
+
       const prevActiveMap = new Map(activeConnectionsRef.current.map((conn) => [conn.id, conn]))
       const existingConnectionIds = new Set(allConnectionsRef.current.map((conn) => conn.id))
-      const speedRatio = 1000 / connectionInterval
-
       const now = Date.now()
+      const elapsed = lastConnectionsUpdateAt.current ? now - lastConnectionsUpdateAt.current : null
+      lastConnectionsUpdateAt.current = now
+      const speedRatio = elapsed && elapsed > 0 ? 1000 / elapsed : 0
       const activeConnIds = new Set(info.connections.map((conn) => conn.id))
 
       activeConnIds.forEach((id) => {
@@ -340,12 +393,14 @@ const Connections: React.FC = () => {
 
       const activeConns = info.connections.map((conn) => {
         const preConn = prevActiveMap.get(conn.id)
-        const downloadSpeed = preConn
-          ? Math.max(0, Math.round((conn.download - preConn.download) * speedRatio))
-          : 0
-        const uploadSpeed = preConn
-          ? Math.max(0, Math.round((conn.upload - preConn.upload) * speedRatio))
-          : 0
+        const downloadSpeed =
+          preConn && speedRatio > 0
+            ? Math.max(0, Math.round((conn.download - preConn.download) * speedRatio))
+            : 0
+        const uploadSpeed =
+          preConn && speedRatio > 0
+            ? Math.max(0, Math.round((conn.upload - preConn.upload) * speedRatio))
+            : 0
         const metadata =
           conn.metadata.type === 'Inner'
             ? { ...conn.metadata, process: 'mihomo', processPath: 'mihomo' }
@@ -366,40 +421,40 @@ const Connections: React.FC = () => {
 
       const activeConnsMap = new Map(activeConns.map((ac) => [ac.id, ac]))
 
-      if (newConnections.length > 0) {
-        const updatedAllConnections = [...allConnectionsRef.current, ...newConnections]
+      const updatedAllConnections = [...allConnectionsRef.current, ...newConnections]
+      const allConns = updatedAllConnections.map((conn) => {
+        const activeConn = activeConnsMap.get(conn.id)
+        if (activeConn) return activeConn
+        const lastActive = lastActiveTime.current.get(conn.id) || 0
+        const isStillActive = now - lastActive < 1000
+        return { ...conn, isActive: isStillActive, downloadSpeed: 0, uploadSpeed: 0 }
+      })
 
-        const allConns = updatedAllConnections.map((conn) => {
-          const activeConn = activeConnsMap.get(conn.id)
-          if (activeConn) return activeConn
-          const lastActive = lastActiveTime.current.get(conn.id) || 0
-          const isStillActive = now - lastActive < 1000
-          return { ...conn, isActive: isStillActive, downloadSpeed: 0, uploadSpeed: 0 }
-        })
-
-        const closedConns = allConns.filter((conn) => !conn.isActive)
-
-        setActiveConnections(activeConns)
-        setClosedConnections(closedConns)
-        const finalAllConnections = allConns.slice(-(activeConns.length + 200))
-        setAllConnections(finalAllConnections)
-        cachedConnections = finalAllConnections
-      } else {
-        const allConns = allConnectionsRef.current.map((conn) => {
-          const activeConn = activeConnsMap.get(conn.id)
-          if (activeConn) return activeConn
-          const lastActive = lastActiveTime.current.get(conn.id) || 0
-          const isStillActive = now - lastActive < 1000
-          return { ...conn, isActive: isStillActive, downloadSpeed: 0, uploadSpeed: 0 }
-        })
-
-        const closedConns = allConns.filter((conn) => !conn.isActive)
-
-        setActiveConnections(activeConns)
-        setClosedConnections(closedConns)
-        setAllConnections(allConns)
-        cachedConnections = allConns
+      const closedConnectionDetails = allConns.filter((conn) => !conn.isActive)
+      const evictedConnections = closedConnectionDetails.slice(0, -CLOSED_CONNECTION_DETAIL_LIMIT)
+      const retainedClosedConnections = closedConnectionDetails.slice(
+        -CLOSED_CONNECTION_DETAIL_LIMIT
+      )
+      const pendingClosedConnections = allConns.filter(
+        (conn) => conn.isActive && !activeConnsMap.has(conn.id)
+      )
+      if (evictedConnections.length > 0) {
+        const summaries = mergeConnectionGroupSummaries(
+          cachedEvictedConnectionGroups,
+          summarizeConnectionGroups(evictedConnections)
+        )
+        cachedEvictedConnectionGroups = summaries
+        setEvictedConnectionGroups(summaries)
       }
+      const finalAllConnections = [
+        ...retainedClosedConnections,
+        ...pendingClosedConnections,
+        ...activeConns
+      ]
+      setActiveConnections(activeConns)
+      setClosedConnections(retainedClosedConnections)
+      setAllConnections(finalAllConnections)
+      cachedConnections = finalAllConnections
     }
 
     window.electron.ipcRenderer.on('mihomoConnections', handleConnections)
@@ -411,6 +466,7 @@ const Connections: React.FC = () => {
 
   useEffect(() => {
     pausedRef.current = paused
+    lastConnectionsUpdateAt.current = null
   }, [paused])
 
   const processAppNameQueue = useCallback(async () => {
@@ -880,12 +936,16 @@ const Connections: React.FC = () => {
         <>
           <div className="flex">
             <div className="flex items-center">
-              <span className="mx-1 text-gray-400">
-                ↑ {calcTraffic(connectionsInfo?.uploadTotal ?? 0)}{' '}
-              </span>
-              <span className="mx-1 text-gray-400">
-                ↓ {calcTraffic(connectionsInfo?.downloadTotal ?? 0)}{' '}
-              </span>
+              <Tooltip content="mihomo 内核启动后的累计流量，包含直连流量；重启内核后清零">
+                <div className="flex items-center">
+                  <span className="mx-1 text-gray-400">
+                    ↑ {calcTraffic(connectionsInfo?.uploadTotal ?? 0)}{' '}
+                  </span>
+                  <span className="mx-1 text-gray-400">
+                    ↓ {calcTraffic(connectionsInfo?.downloadTotal ?? 0)}{' '}
+                  </span>
+                </div>
+              </Tooltip>
             </div>
             <Badge
               className="mt-2"
@@ -991,7 +1051,10 @@ const Connections: React.FC = () => {
                   size="sm"
                   shape="circle"
                   variant="flat"
-                  content={closedConnections.length}
+                  content={
+                    closedConnections.length +
+                    evictedConnectionGroups.reduce((count, group) => count + group.count, 0)
+                  }
                   showOutline={false}
                 >
                   <span className="p-1">已关闭</span>

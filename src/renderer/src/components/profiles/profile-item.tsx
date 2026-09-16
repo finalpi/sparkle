@@ -291,7 +291,11 @@ const ProfileItem: React.FC<Props> = (props) => {
               <div
                 className={`mt-2 flex justify-between ${isCurrent ? 'text-primary-foreground' : 'text-foreground'}`}
               >
-                <small>{`${calcTraffic(usage)}/${calcTraffic(total)}`}</small>
+                <Tooltip
+                  content={`服务商上报的订阅用量，更新于 ${dayjs(info.updated).format('YYYY-MM-DD HH:mm:ss')}`}
+                >
+                  <small>{`${calcTraffic(usage)}/${calcTraffic(total)}`}</small>
+                </Tooltip>
                 {profileDisplayDate === 'expire' ? (
                   <Button
                     size="sm"

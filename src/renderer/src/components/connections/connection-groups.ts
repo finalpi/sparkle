@@ -15,6 +15,11 @@ export interface ConnectionGroup {
   connections: ControllerConnectionDetail[]
 }
 
+export type ConnectionGroupSummary = Omit<
+  ConnectionGroup,
+  'uploadSpeed' | 'downloadSpeed' | 'connections'
+>
+
 export function groupKey(conn: ControllerConnectionDetail): string {
   const process = conn.metadata.process || ''
   return process !== '' ? process : conn.metadata.sourceIP || ''
@@ -23,9 +28,19 @@ export function groupKey(conn: ControllerConnectionDetail): string {
 export function buildConnectionGroups(
   connections: ControllerConnectionDetail[],
   sort: ConnectionGroupSort,
-  asc: boolean
+  asc: boolean,
+  summaries: ConnectionGroupSummary[] = []
 ): ConnectionGroup[] {
   const groups = new Map<string, ConnectionGroup>()
+
+  for (const summary of summaries) {
+    groups.set(summary.key, {
+      ...summary,
+      uploadSpeed: 0,
+      downloadSpeed: 0,
+      connections: []
+    })
+  }
 
   for (const conn of connections) {
     const key = groupKey(conn)
@@ -62,6 +77,41 @@ export function buildConnectionGroups(
   const rows = Array.from(groups.values())
   sortGroups(rows, sort, asc)
   return rows
+}
+
+export function summarizeConnectionGroups(
+  connections: ControllerConnectionDetail[]
+): ConnectionGroupSummary[] {
+  return buildConnectionGroups(connections, 'name', true).map(
+    ({
+      uploadSpeed: _uploadSpeed,
+      downloadSpeed: _downloadSpeed,
+      connections: _connections,
+      ...group
+    }) => group
+  )
+}
+
+export function mergeConnectionGroupSummaries(
+  current: ConnectionGroupSummary[],
+  additions: ConnectionGroupSummary[]
+): ConnectionGroupSummary[] {
+  const merged = new Map(current.map((summary) => [summary.key, { ...summary }]))
+
+  for (const addition of additions) {
+    const existing = merged.get(addition.key)
+    if (!existing) {
+      merged.set(addition.key, { ...addition })
+      continue
+    }
+
+    existing.count += addition.count
+    existing.upload += addition.upload
+    existing.download += addition.download
+    if (!existing.processPath && addition.processPath) existing.processPath = addition.processPath
+  }
+
+  return Array.from(merged.values())
 }
 
 function sortGroups(rows: ConnectionGroup[], sort: ConnectionGroupSort, asc: boolean): void {
