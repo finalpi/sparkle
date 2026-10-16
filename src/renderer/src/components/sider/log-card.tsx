@@ -1,21 +1,23 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card } from '@heroui/react'
+
 import { IoJournalOutline } from 'react-icons/io5'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import React from 'react'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 
 const LogCard: React.FC<Props> = (props) => {
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const { logCardStatus = 'col-span-1', disableAnimation = false } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/logs')
   const {
     attributes,
@@ -31,25 +33,18 @@ const LogCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${logCardStatus} flex justify-center`}>
-        <Tooltip content="日志" placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/logs')
-            }}
-          >
-            <IoJournalOutline className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={logCardStatus}
+        title="日志"
+        route="/logs"
+        icon={<IoJournalOutline className="text-[20px]" />}
+        expanded={expanded}
+      />
     )
   }
   return (
     <div
+      ref={setNodeRef}
       style={{
         position: 'relative',
         transform: CSS.Transform.toString(transform),
@@ -59,19 +54,22 @@ const LogCard: React.FC<Props> = (props) => {
       className={`${logCardStatus} log-card`}
     >
       <Card
-        fullWidth
-        ref={setNodeRef}
         {...attributes}
         {...listeners}
-        className={`${match ? 'bg-primary' : 'hover:bg-primary/30'} ${isDragging ? `${disableAnimation ? '' : 'scale-[0.95]'} tap-highlight-transparent` : ''}`}
+        className={[
+          'w-full',
+          `${match ? 'bg-primary' : 'hover:bg-primary/30'} ${isDragging ? `${disableAnimation ? '' : 'scale-[0.95]'} tap-highlight-transparent` : ''}`
+        ]
+          .filter(Boolean)
+          .join(' ')}
       >
-        <CardBody className="pb-1 pt-0 px-0 overflow-y-visible">
+        <Card.Content className="pb-1 pt-0 px-0 overflow-y-visible">
           <div className="flex justify-between">
             <Button
               isIconOnly
+              variant="secondary"
+              data-color="default"
               className="bg-transparent pointer-events-none"
-              variant="flat"
-              color="default"
             >
               <IoJournalOutline
                 color="default"
@@ -79,14 +77,14 @@ const LogCard: React.FC<Props> = (props) => {
               />
             </Button>
           </div>
-        </CardBody>
-        <CardFooter className="pt-1">
+        </Card.Content>
+        <Card.Footer className="pt-1">
           <h3
             className={`text-md font-bold ${match ? 'text-primary-foreground' : 'text-foreground'}`}
           >
             日志
           </h3>
-        </CardFooter>
+        </Card.Footer>
       </Card>
     </div>
   )

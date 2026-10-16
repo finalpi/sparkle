@@ -1,4 +1,5 @@
 import { ChildProcess, spawn } from 'child_process'
+import { createInterface } from 'readline'
 import { dataDir, coreLogPath, mihomoCorePath } from '../utils/dirs'
 import { systemCoreOnlyBuild } from '../../shared/build-flags'
 import { generateProfile, getRuntimeConfig } from './factory'
@@ -57,6 +58,12 @@ import {
   isUpdaterFinishedLog
 } from './startup-chain'
 import { createServiceCoreRuntime } from './service-core-runtime'
+import {
+  emitWebhook,
+  flushWebhooks,
+  notifyCoreStarted,
+  notifyCoreStopped
+} from '../resolve/webhook'
 
 const ctlParam = process.platform === 'win32' ? '-ext-ctl-pipe' : '-ext-ctl-unix'
 
@@ -212,7 +219,18 @@ async function startMihomoApiStreams(): Promise<void> {
   directCoreState.retry = 10
 }
 
-async function completeCoreInitialization(logLevel?: LogLevel): Promise<void> {
+async function completeCoreInitialization(
+  logLevel?: LogLevel,
+  child?: ChildProcess
+): Promise<void> {
+  if (
+    child?.pid &&
+    child === directCoreState.child &&
+    child.exitCode === null &&
+    child.signalCode === null
+  ) {
+    notifyCoreStarted('direct', child.pid)
+  }
   const tasks: Promise<unknown>[] = [
     delay(100).then(() => {
       mainWindow?.webContents.send('groupsUpdated')
@@ -330,6 +348,7 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     core = 'mihomo',
     corePermissionMode = 'elevated',
     serviceRunMode = 'auto',
+    serviceCpuAffinity = [],
     coreStartupMode = 'post-up',
     autoSetDNSMode = 'none',
     diffWorkDir = false,
@@ -358,7 +377,9 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
   }
 
   await generateProfile()
-  await checkProfile()
+  if (useServiceCore || detached) {
+    await checkProfile()
+  }
   let serviceCoreRunning = false
   if (useServiceCore) {
     try {
@@ -420,6 +441,7 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
       args: spawnArgs,
       mode: serviceRunMode,
       safe_paths: safePaths,
+      cpu_affinity: serviceCpuAffinity,
       env,
       mihomo_cpu_priority: mihomoCpuPriority,
       log_path: coreLogPath(),
@@ -470,12 +492,35 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     env: env
   })
   directCoreState.child = child
+  let startupOutput = ''
+  let configurationRejected = false
+  let spawnError: Error | undefined
+  const captureStartupOutput = (data: Buffer): void => {
+    if (initialized) return
+    startupOutput += data.toString()
+    configurationRejected ||= startupOutput.includes('Parse config error:')
+    startupOutput = startupOutput.slice(-16384)
+  }
+  child.stdout?.on('data', captureStartupOutput)
+  child.stderr?.on('data', captureStartupOutput)
+  child.once('error', (error) => {
+    spawnError = error
+    emitWebhook('lifecycle', 'core.failed', { mode: 'direct', reason: 'spawn_failed' }, 'failure')
+  })
+  const startupFailure = (reason: unknown): Error => {
+    const details = startupOutput.trim()
+    return new Error(
+      `内核启动失败：${spawnError?.message || String(reason)}${details ? `\n${details}` : ''}`
+    )
+  }
   hookWaiter?.attachProcess(child)
   if (child.pid) {
     try {
       os.setPriority(child.pid, os.constants.priority[mihomoCpuPriority])
     } catch (error) {
-      await appendAppLog(`[Manager]: set core priority failed, ${error}\n`)
+      const log = appendAppLog(`[Manager]: set core priority failed, ${error}\n`)
+      if (detached) await log
+      else void log.catch(() => {})
     }
   }
   if (detached) {
@@ -485,9 +530,18 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
     })
   }
   child.on('close', async (code, signal) => {
+    if (!initialized && !spawnError) {
+      emitWebhook(
+        'lifecycle',
+        'core.failed',
+        { mode: 'direct', reason: 'startup_failed' },
+        'failure'
+      )
+    }
+    notifyCoreStopped('direct', child.pid, 'exited')
     flushDirectCoreLogNotifications()
     await appendAppLog(`[Manager]: Core closed, code: ${code}, signal: ${signal}\n`)
-    if (directCoreState.retry) {
+    if (!configurationRejected && directCoreState.retry) {
       await appendAppLog(`[Manager]: Try Restart Core\n`)
       directCoreState.retry--
       await restartCore()
@@ -521,54 +575,45 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
 
   const waitForCoreReadyByLog = (): Promise<Promise<void>[]> => {
     let controllerReady = false
+    let providersReady = false
+    let completing = false
 
     return new Promise((resolve, reject) => {
+      if (!child.stdout) {
+        reject(startupFailure('Core stdout is unavailable'))
+        return
+      }
+      const lines = createInterface({ input: child.stdout })
       child.once('close', (code, signal) => {
-        reject(new Error(`内核启动失败，code: ${code}, signal: ${signal}`))
+        lines.close()
+        reject(startupFailure(`code: ${code}, signal: ${signal}`))
       })
 
-      child.stdout?.on('data', async (data) => {
-        const str = data.toString()
-        await handleCoreOutput(str, reject)
+      lines.on('line', (line) => {
+        const handleLine = async (): Promise<void> => {
+          await handleCoreOutput(line, reject)
+          if (initialized) return
 
-        if (!controllerReady && isControllerReadyLog(str)) {
-          controllerReady = true
-          resolve([
-            new Promise((resolve, reject) => {
-              const handleProviderInitialization = async (logLine: string): Promise<void> => {
-                providerTracker.track(logLine)
+          providerTracker.track(line)
+          providersReady ||= providerTracker.isReady(line)
+          controllerReady ||= isControllerReadyLog(line)
 
-                if (isTunPermissionError(logLine)) {
-                  patchControledMihomoConfig({ tun: { enable: false } })
-                  mainWindow?.webContents.send('controledMihomoConfigUpdated')
-                  ipcMain.emit('updateTrayMenu')
-                  reject('虚拟网卡启动失败，前往内核设置页尝试手动授予内核权限')
-                }
+          if (isTunPermissionError(line)) {
+            patchControledMihomoConfig({ tun: { enable: false } })
+            mainWindow?.webContents.send('controledMihomoConfigUpdated')
+            ipcMain.emit('updateTrayMenu')
+            reject('虚拟网卡启动失败，前往内核设置页尝试手动授予内核权限')
+            return
+          }
 
-                if (providerTracker.isReady(logLine)) {
-                  await waitForMihomoReady()
-                  initialized = true
-                  completeCoreInitialization(logLevel)
-                    .then(() => resolve())
-                    .catch(reject)
-                }
-              }
-
-              child.stdout?.on('data', (data) => {
-                if (!initialized) {
-                  handleProviderInitialization(data.toString()).catch(reject)
-                }
-              })
-
-              child.once('close', (code, signal) => {
-                if (!initialized) {
-                  reject(new Error(`内核启动失败，code: ${code}, signal: ${signal}`))
-                }
-              })
-            })
-          ])
+          if (!controllerReady || !providersReady || completing) return
+          completing = true
           await startMihomoApiStreams()
+          await waitForMihomoReady()
+          initialized = true
+          resolve([completeCoreInitialization(logLevel, child)])
         }
+        handleLine().catch(reject)
       })
     })
   }
@@ -585,9 +630,9 @@ export async function startCore(detached = false): Promise<Promise<void>[]> {
         .then(async () => {
           initialized = true
           await startMihomoApiStreams()
-          resolve([completeCoreInitialization(logLevel)])
+          resolve([completeCoreInitialization(logLevel, child)])
         })
-        .catch(reject)
+        .catch((error) => reject(startupFailure(error)))
     })
   }
 
@@ -612,6 +657,7 @@ export async function stopCore(force = false): Promise<void> {
   if (shouldStopServiceCore) {
     try {
       await stopServiceCore()
+      notifyCoreStopped('service')
     } catch (error) {
       await appendAppLog(`[Manager]: stop service core failed, ${error}\n`)
     } finally {
@@ -624,6 +670,9 @@ export async function stopCore(force = false): Promise<void> {
   if (child) {
     directCoreState.child = undefined
     await stopChildProcess(child)
+    if (child.exitCode !== null || child.signalCode !== null) {
+      notifyCoreStopped('direct', child.pid)
+    }
   }
 
   await getAxios(true).catch(() => {})
@@ -729,13 +778,14 @@ export async function restartCore(): Promise<void> {
     const promises = await startCore()
     await Promise.all(promises)
   } catch (e) {
+    emitWebhook('lifecycle', 'core.failed', { reason: 'restart_failed' }, 'failure')
     void showNotification({ title: '内核启动出错', body: `${e}`, variant: 'danger' })
   }
 }
 
 export async function keepCoreAlive(): Promise<void> {
   try {
-    const { corePermissionMode = 'elevated' } = await getAppConfig()
+    const { corePermissionMode = 'elevated', webhook } = await getAppConfig()
     if (corePermissionMode === 'service') {
       return
     }
@@ -743,8 +793,37 @@ export async function keepCoreAlive(): Promise<void> {
     await startCore(true)
     if (directCoreState.child?.pid) {
       await writeFile(path.join(dataDir(), 'core.pid'), directCoreState.child.pid.toString())
+      if (
+        webhook?.targets?.some(
+          (target) =>
+            target.enabled !== false &&
+            !!target.url &&
+            (!target.categories || target.categories.includes('lifecycle'))
+        )
+      ) {
+        const child = directCoreState.child
+        const deadline = Date.now() + 3000
+        while (Date.now() < deadline) {
+          const remaining = deadline - Date.now()
+          try {
+            await (
+              await getAxios()
+            ).get('/version', { timeout: remaining, signal: AbortSignal.timeout(remaining) })
+            if (
+              child === directCoreState.child &&
+              child.exitCode === null &&
+              child.signalCode === null
+            )
+              notifyCoreStarted('direct', child.pid)
+            break
+          } catch {
+            await delay(100)
+          }
+        }
+      }
     }
   } catch (e) {
+    emitWebhook('lifecycle', 'core.failed', { reason: 'retained_start_failed' }, 'failure')
     void showNotification({ title: '内核启动出错', body: `${e}`, variant: 'danger' })
   }
 }
@@ -752,6 +831,8 @@ export async function keepCoreAlive(): Promise<void> {
 export async function quitWithoutCore(): Promise<void> {
   await keepCoreAlive()
   await startMonitor(true)
+  emitWebhook('application', 'app.quit', { keepCore: true })
+  await flushWebhooks()
   app.exit()
 }
 

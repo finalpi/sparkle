@@ -57,6 +57,11 @@ export async function generateProfile(): Promise<void> {
   // 应用前置和后置规则
   await applyCustomRules(profile)
 
+  if (controlDns && profile.dns) {
+    profile.dns['proxy-server-nameserver-policy'] =
+      configToMerge.dns?.['proxy-server-nameserver-policy'] ?? {}
+  }
+
   await cleanProfile(profile, controlDns, controlSniff)
 
   runtimeConfig = profile
@@ -76,7 +81,7 @@ export async function generateProfile(): Promise<void> {
  */
 async function applyCustomRules(profile: MihomoConfig): Promise<void> {
   const { prependRules = [], appendRules = [] } = await getAppConfig()
-  
+
   // 确保rules数组存在
   if (!Array.isArray(profile.rules)) {
     profile.rules = []

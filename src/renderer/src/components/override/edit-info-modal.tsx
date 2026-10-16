@@ -8,7 +8,7 @@ import {
   Separator,
   Surface,
   Switch
-} from '@heroui-v3/react'
+} from '@heroui/react'
 import type { ReactNode } from 'react'
 import React, { useState } from 'react'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
@@ -150,7 +150,7 @@ const EditInfoModal: React.FC<Props> = (props) => {
                       <Select.Value />
                       <Select.Indicator />
                     </Select.Trigger>
-                    <Select.Popover>
+                    <Select.Popover placement="bottom" shouldFlip containerPadding={56}>
                       <ListBox>
                         <ListBox.Item id="yaml" textValue="YAML">
                           YAML
@@ -192,6 +192,7 @@ const EditInfoModal: React.FC<Props> = (props) => {
                 {item.id ? '保存' : '导入'}
               </Button>
             </Modal.Footer>
+            <Modal.CloseTrigger className="app-nodrag" />
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

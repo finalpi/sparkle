@@ -1,27 +1,29 @@
-import { Button, Card, CardBody, CardFooter, Tooltip } from '@heroui/react'
+import { Button, Card } from '@heroui/react'
+
 import { useControledMihomoConfig } from '@renderer/hooks/use-controled-mihomo-config'
 import BorderSwitch from '@renderer/components/base/border-swtich'
 import { LuServer } from 'react-icons/lu'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { patchMihomoConfig } from '@renderer/utils/ipc'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import React from 'react'
+import SiderItem from './sider-item'
 
 interface Props {
   iconOnly?: boolean
+  expanded?: boolean
 }
 const DNSCard: React.FC<Props> = (props) => {
   const { appConfig } = useAppConfig()
-  const { iconOnly } = props
+  const { iconOnly, expanded } = props
   const {
     dnsCardStatus = 'col-span-1',
     controlDns = true,
     disableAnimation = false
   } = appConfig || {}
   const location = useLocation()
-  const navigate = useNavigate()
   const match = location.pathname.includes('/dns')
   const { controledMihomoConfig, patchControledMihomoConfig } = useControledMihomoConfig()
   const { dns, tun } = controledMihomoConfig || {}
@@ -44,26 +46,26 @@ const DNSCard: React.FC<Props> = (props) => {
 
   if (iconOnly) {
     return (
-      <div className={`${dnsCardStatus} ${!controlDns ? 'hidden' : ''} flex justify-center`}>
-        <Tooltip content="DNS" placement="right">
-          <Button
-            size="sm"
-            isIconOnly
-            color={match ? 'primary' : 'default'}
-            variant={match ? 'solid' : 'light'}
-            onPress={() => {
-              navigate('/dns')
-            }}
-          >
-            <LuServer className="text-[20px]" />
-          </Button>
-        </Tooltip>
-      </div>
+      <SiderItem
+        className={`${dnsCardStatus} ${!controlDns ? 'hidden' : ''}`}
+        title="DNS"
+        route="/dns"
+        icon={<LuServer className="text-[20px]" />}
+        expanded={expanded}
+      >
+        <BorderSwitch
+          isShowBorder={match && enable}
+          isSelected={enable}
+          isDisabled={tun?.enable}
+          onValueChange={onChange}
+        />
+      </SiderItem>
     )
   }
 
   return (
     <div
+      ref={setNodeRef}
       style={{
         position: 'relative',
         transform: CSS.Transform.toString(transform),
@@ -73,19 +75,22 @@ const DNSCard: React.FC<Props> = (props) => {
       className={`${dnsCardStatus} ${!controlDns ? 'hidden' : ''} dns-card`}
     >
       <Card
-        fullWidth
-        ref={setNodeRef}
         {...attributes}
         {...listeners}
-        className={`${match ? 'bg-primary' : 'hover:bg-primary/30'} ${isDragging ? `${disableAnimation ? '' : 'scale-[0.95]'} tap-highlight-transparent` : ''}`}
+        className={[
+          'w-full',
+          `${match ? 'bg-primary' : 'hover:bg-primary/30'} ${isDragging ? `${disableAnimation ? '' : 'scale-[0.95]'} tap-highlight-transparent` : ''}`
+        ]
+          .filter(Boolean)
+          .join(' ')}
       >
-        <CardBody className="pb-1 pt-0 px-0 overflow-y-visible">
+        <Card.Content className="pb-1 pt-0 px-0 overflow-y-visible">
           <div className="flex justify-between">
             <Button
               isIconOnly
+              variant="secondary"
+              data-color="default"
               className="bg-transparent pointer-events-none"
-              variant="flat"
-              color="default"
             >
               <LuServer
                 className={`${match ? 'text-primary-foreground' : 'text-foreground'} text-[24px] font-bold`}
@@ -98,14 +103,14 @@ const DNSCard: React.FC<Props> = (props) => {
               onValueChange={onChange}
             />
           </div>
-        </CardBody>
-        <CardFooter className="pt-1">
+        </Card.Content>
+        <Card.Footer className="pt-1">
           <h3
             className={`text-md font-bold ${match ? 'text-primary-foreground' : 'text-foreground'}`}
           >
             DNS
           </h3>
-        </CardFooter>
+        </Card.Footer>
       </Card>
     </div>
   )

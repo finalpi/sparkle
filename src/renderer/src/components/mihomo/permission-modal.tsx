@@ -1,6 +1,7 @@
+import { Chip, Card, Separator, Button, Spinner, Modal } from '@heroui/react'
+
 import React, { useEffect, useState } from 'react'
-import { Button, Card, CardBody, CardHeader, Chip, Divider } from '@heroui/react'
-import { Modal } from '@heroui-v3/react'
+
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 import {
   checkCorePermission,
@@ -20,9 +21,17 @@ interface Props {
 const PermissionModal: React.FC<Props> = (props) => {
   const { onChange, onRevoke, onGrant } = props
   useAppConfig()
-  const [loading, setLoading] = useState<{ mihomo?: boolean; 'mihomo-alpha'?: boolean }>({})
+  const [loading, setLoading] = useState<{
+    mihomo?: boolean
+    'mihomo-alpha'?: boolean
+  }>({})
   const [hasPermission, setHasPermission] = useState<
-    { mihomo: boolean; 'mihomo-alpha': boolean } | boolean | null
+    | {
+        mihomo: boolean
+        'mihomo-alpha': boolean
+      }
+    | boolean
+    | null
   >(null)
   const isWindows = platform === 'win32'
 
@@ -90,12 +99,14 @@ const PermissionModal: React.FC<Props> = (props) => {
     return hasPermission[coreName] ? '已授权' : '未授权'
   }
 
-  const getStatusColor = (coreName: 'mihomo' | 'mihomo-alpha'): string => {
-    if (hasPermission === null) return 'bg-default-400 animate-pulse'
+  const getStatusColor = (
+    coreName: 'mihomo' | 'mihomo-alpha'
+  ): 'success' | 'warning' | 'default' => {
+    if (hasPermission === null) return 'default'
     if (typeof hasPermission === 'boolean') {
-      return hasPermission ? 'bg-success' : 'bg-warning'
+      return hasPermission ? 'success' : 'warning'
     }
-    return hasPermission[coreName] ? 'bg-success' : 'bg-warning'
+    return hasPermission[coreName] ? 'success' : 'warning'
   }
 
   return (
@@ -115,148 +126,132 @@ const PermissionModal: React.FC<Props> = (props) => {
               <div className="space-y-4">
                 {isWindows ? (
                   <>
-                    <Card
-                      shadow="sm"
-                      className="border-none bg-linear-to-br from-default-50 to-default-100"
-                    >
-                      <CardBody className="py-4">
+                    <Card className="border border-default-200 bg-surface" data-shadow="sm">
+                      <Card.Content className="py-4">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-2">
                             <span className="text-sm font-medium">提权配置状态</span>
                           </div>
                           <Chip
-                            color={
+                            size="sm"
+                            data-color={
                               typeof hasPermission === 'boolean'
                                 ? hasPermission
                                   ? 'success'
                                   : 'warning'
                                 : 'default'
                             }
-                            variant="flat"
-                            size="sm"
+                            variant="soft"
                           >
-                            {hasPermission === null
-                              ? '检查中...'
-                              : typeof hasPermission === 'boolean'
-                                ? hasPermission
-                                  ? '已配置'
-                                  : '未配置'
-                                : '未知'}
+                            <Chip.Label>
+                              {hasPermission === null
+                                ? '检查中...'
+                                : typeof hasPermission === 'boolean'
+                                  ? hasPermission
+                                    ? '已配置'
+                                    : '未配置'
+                                  : '未知'}
+                            </Chip.Label>
                           </Chip>
                         </div>
-                      </CardBody>
+                      </Card.Content>
                     </Card>
 
-                    <Divider />
+                    <Separator />
 
                     <div className="text-xs text-default-500 space-y-2">
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5">•</span>
-                        <span>提权配置会让直接运行模式具备必要的系统权限</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5">•</span>
-                        <span>可以让内核以管理员权限运行，无需每次 UAC 提示</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <span className="mt-0.5">•</span>
-                        <span>取消注册后可能需要手动提权才能使用某些功能</span>
-                      </div>
+                      <div>提权配置会让直接运行模式具备必要的系统权限</div>
+                      <div>可以让内核以管理员权限运行，无需每次 UAC 提示</div>
+                      <div>取消注册后可能需要手动提权才能使用某些功能</div>
                     </div>
                   </>
                 ) : (
                   <>
-                    <div className="space-y-3">
-                      <Card shadow="sm" className="border-none">
-                        <CardHeader className="pb-0 pt-4 px-4 flex-col items-start">
-                          <div className="flex items-center justify-between w-full">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-medium">内置正式版</h4>
-                            </div>
-                            <Chip
-                              color={
-                                getStatusColor('mihomo') === 'bg-success' ? 'success' : 'warning'
-                              }
-                              variant="flat"
-                              size="sm"
-                            >
-                              {getStatusText('mihomo')}
+                    <Card className="border border-default-200 bg-surface" data-shadow="sm">
+                      <Card.Content className="space-y-3 py-4">
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">内置正式版</span>
+                            <Chip size="sm" data-color={getStatusColor('mihomo')} variant="soft">
+                              <Chip.Label>{getStatusText('mihomo')}</Chip.Label>
                             </Chip>
                           </div>
-                        </CardHeader>
-                        <CardBody className="pt-3 px-4 pb-4">
                           {typeof hasPermission !== 'boolean' && hasPermission?.mihomo ? (
                             <Button
                               size="sm"
-                              color="warning"
-                              variant="flat"
                               onPress={() => handleCoreAction('mihomo', false)}
-                              isLoading={loading.mihomo}
                               fullWidth
+                              variant="secondary"
+                              data-color="warning"
+                              isPending={loading.mihomo}
+                              isDisabled={loading.mihomo}
                             >
+                              {loading.mihomo ? <Spinner size="sm" color="current" /> : null}
                               撤销授权
                             </Button>
                           ) : (
                             <Button
                               size="sm"
-                              color="primary"
-                              variant="shadow"
                               onPress={() => handleCoreAction('mihomo', true)}
-                              isLoading={loading.mihomo}
                               fullWidth
+                              variant="primary"
+                              data-color="primary"
+                              data-shadow="true"
+                              isPending={loading.mihomo}
+                              isDisabled={loading.mihomo}
                             >
+                              {loading.mihomo ? <Spinner size="sm" color="current" /> : null}
                               授权内核
                             </Button>
                           )}
-                        </CardBody>
-                      </Card>
-
-                      <Card shadow="sm" className="border-none">
-                        <CardHeader className="pb-0 pt-4 px-4 flex-col items-start">
-                          <div className="flex items-center justify-between w-full">
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold text-medium">内置预览版</h4>
-                            </div>
+                        </div>
+                        <Separator />
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium">内置预览版</span>
                             <Chip
-                              color={
-                                getStatusColor('mihomo-alpha') === 'bg-success'
-                                  ? 'success'
-                                  : 'warning'
-                              }
-                              variant="flat"
                               size="sm"
+                              data-color={getStatusColor('mihomo-alpha')}
+                              variant="soft"
                             >
-                              {getStatusText('mihomo-alpha')}
+                              <Chip.Label>{getStatusText('mihomo-alpha')}</Chip.Label>
                             </Chip>
                           </div>
-                        </CardHeader>
-                        <CardBody className="pt-3 px-4 pb-4">
                           {typeof hasPermission !== 'boolean' && hasPermission?.['mihomo-alpha'] ? (
                             <Button
                               size="sm"
-                              color="warning"
-                              variant="flat"
                               onPress={() => handleCoreAction('mihomo-alpha', false)}
-                              isLoading={loading['mihomo-alpha']}
                               fullWidth
+                              variant="secondary"
+                              data-color="warning"
+                              isPending={loading['mihomo-alpha']}
+                              isDisabled={loading['mihomo-alpha']}
                             >
+                              {loading['mihomo-alpha'] ? (
+                                <Spinner size="sm" color="current" />
+                              ) : null}
                               撤销授权
                             </Button>
                           ) : (
                             <Button
                               size="sm"
-                              color="primary"
-                              variant="shadow"
                               onPress={() => handleCoreAction('mihomo-alpha', true)}
-                              isLoading={loading['mihomo-alpha']}
                               fullWidth
+                              variant="primary"
+                              data-color="primary"
+                              data-shadow="true"
+                              isPending={loading['mihomo-alpha']}
+                              isDisabled={loading['mihomo-alpha']}
                             >
+                              {loading['mihomo-alpha'] ? (
+                                <Spinner size="sm" color="current" />
+                              ) : null}
                               授权内核
                             </Button>
                           )}
-                        </CardBody>
-                      </Card>
-                    </div>
+                        </div>
+                      </Card.Content>
+                    </Card>
 
                     <div className="text-xs text-default-500 space-y-2">
                       <div className="flex items-start gap-2">
@@ -270,15 +265,7 @@ const PermissionModal: React.FC<Props> = (props) => {
                 )}
               </div>
             </Modal.Body>
-            <Modal.Footer className="space-x-2">
-              <Button
-                size="sm"
-                variant="light"
-                onPress={() => onChange(false)}
-                isDisabled={Object.values(loading).some((v) => v)}
-              >
-                关闭
-              </Button>
+            <Modal.Footer className="flex-col gap-2 sm:flex-row">
               {isWindows &&
                 (() => {
                   const hasAnyPermission =
@@ -288,24 +275,31 @@ const PermissionModal: React.FC<Props> = (props) => {
                   return hasAnyPermission ? (
                     <Button
                       size="sm"
-                      color="warning"
                       onPress={() => handleAction(onRevoke)}
-                      isLoading={isLoading}
+                      variant="primary"
+                      data-color="warning"
+                      className="min-w-20"
+                      isPending={isLoading}
+                      isDisabled={isLoading}
                     >
-                      取消提权
+                      {isLoading ? <Spinner size="sm" color="current" /> : null}取消提权
                     </Button>
                   ) : (
                     <Button
                       size="sm"
-                      color="primary"
                       onPress={() => handleAction(onGrant)}
-                      isLoading={isLoading}
+                      variant="primary"
+                      data-color="primary"
+                      className="min-w-20"
+                      isPending={isLoading}
+                      isDisabled={isLoading}
                     >
-                      配置提权
+                      {isLoading ? <Spinner size="sm" color="current" /> : null}配置提权
                     </Button>
                   )
                 })()}
             </Modal.Footer>
+            <Modal.CloseTrigger className="app-nodrag" />
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

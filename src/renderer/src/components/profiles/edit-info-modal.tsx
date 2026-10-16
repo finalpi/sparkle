@@ -9,7 +9,7 @@ import {
   Surface,
   Switch,
   Tooltip
-} from '@heroui-v3/react'
+} from '@heroui/react'
 import type { ReactNode } from 'react'
 import React, { useState } from 'react'
 import { useOverrideConfig } from '@renderer/hooks/use-override-config'
@@ -589,6 +589,7 @@ const EditInfoModal: React.FC<Props> = (props) => {
                 {item.id ? '保存' : '导入'}
               </Button>
             </Modal.Footer>
+            <Modal.CloseTrigger className="app-nodrag" />
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>

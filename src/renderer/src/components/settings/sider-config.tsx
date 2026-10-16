@@ -1,7 +1,7 @@
+import { Tabs } from '@heroui/react'
 import React from 'react'
 import SettingCard from '../base/base-setting-card'
 import SettingItem from '../base/base-setting-item'
-import { RadioGroup, Radio } from '@heroui/react'
 import { useAppConfig } from '@renderer/hooks/use-app-config'
 const titleMap = {
   sysproxyCardStatus: '系统代理',
@@ -62,17 +62,32 @@ const SiderConfig: React.FC = () => {
             key={key}
             divider={index !== array.length - 1}
           >
-            <RadioGroup
-              orientation="horizontal"
-              value={cardStatus[key]}
-              onValueChange={(v) => {
+            <Tabs
+              selectedKey={cardStatus[key]}
+              onSelectionChange={(v) => {
                 patchAppConfig({ [key]: v as CardStatus })
               }}
+              data-color="primary"
+              data-size="sm"
+              data-full-width={false}
             >
-              <Radio value="col-span-2">大</Radio>
-              <Radio value="col-span-1">小</Radio>
-              <Radio value="hidden">隐藏</Radio>
-            </RadioGroup>
+              <Tabs.ListContainer>
+                <Tabs.List aria-label={`${titleMap[key]}显示方式`}>
+                  <Tabs.Tab key="col-span-2" id="col-span-2">
+                    大
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                  <Tabs.Tab key="col-span-1" id="col-span-1">
+                    小
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                  <Tabs.Tab key="hidden" id="hidden">
+                    隐藏
+                    <Tabs.Indicator />
+                  </Tabs.Tab>
+                </Tabs.List>
+              </Tabs.ListContainer>
+            </Tabs>
           </SettingItem>
         )
       })}

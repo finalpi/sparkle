@@ -48,6 +48,7 @@ const electronBuilder = path.join(
   process.platform === 'win32' ? 'electron-builder.cmd' : 'electron-builder'
 )
 const args = ['--publish', 'never', '--linux', ...process.argv.slice(2)]
+args.unshift('--config.productName=sparkle')
 let tempConfigDir: string | undefined
 
 if (systemCoreOnlyBuild) {

@@ -1,4 +1,5 @@
 import { Button } from '@heroui/react'
+
 import BasePage from '@renderer/components/base/base-page'
 // import { CgWebsite } from 'react-icons/cg'
 import { IoLogoGithub } from 'react-icons/io5'
@@ -11,6 +12,7 @@ import { FaTelegramPlane } from 'react-icons/fa'
 import SiderConfig from '@renderer/components/settings/sider-config'
 import SubStoreConfig from '@renderer/components/settings/substore-config'
 import AppearanceConfig from '@renderer/components/settings/appearance-confis'
+import WebhookConfigPanel from '@renderer/components/settings/webhook-config'
 
 const Settings: React.FC = () => {
   return (
@@ -19,36 +21,38 @@ const Settings: React.FC = () => {
       header={
         <>
           {/* <Button
-            isIconOnly
-            size="sm"
-            variant="light"
-            title="官方文档"
-            className="app-nodrag"
-            onPress={() => {
-              window.open('https://')
-            }}
-          >
-            <CgWebsite className="text-lg" />
-          </Button> */}
+              isIconOnly
+              size="sm"
+              variant="light"
+              title="官方文档"
+              className="app-nodrag"
+              onPress={() => {
+                window.open('https://')
+              }}
+            >
+              <CgWebsite className="text-lg" />
+            </Button> */}
           <Button
             isIconOnly
             size="sm"
-            variant="light"
-            className="app-nodrag"
             onPress={() => {
               window.open('https://github.com/finalpi/sparkle')
             }}
+            variant="ghost"
+            data-color="default"
+            className="app-nodrag"
           >
             <IoLogoGithub className="text-lg" />
           </Button>
           <Button
             isIconOnly
             size="sm"
-            variant="light"
-            className="app-nodrag"
             onPress={() => {
               window.open('https://t.me/atri0828')
             }}
+            variant="ghost"
+            data-color="default"
+            className="app-nodrag"
           >
             <FaTelegramPlane className="text-lg" />
           </Button>
@@ -60,6 +64,7 @@ const Settings: React.FC = () => {
       <SubStoreConfig />
       <SiderConfig />
       <WebdavConfig />
+      <WebhookConfigPanel />
       <AdvancedSettings />
       <ShortcutConfig />
       <Actions />
