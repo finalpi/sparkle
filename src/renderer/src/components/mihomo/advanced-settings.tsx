@@ -96,14 +96,16 @@ const AdvancedSetting: React.FC = () => {
       </SettingItem>
       <SettingItem
         compatKey="legacy"
-        title="使用 RTT 延迟测试"
+        title="统一延迟（RTT）"
         actions={
           <Tooltip delay={0}>
             <Button isIconOnly size="sm" variant="ghost" data-color="default">
               <IoIosHelpCircle className="text-lg" />
             </Button>
             <Tooltip.Content>
-              {'开启后会使用统一延迟测试来获取节点延迟，以消除不同节点握手时间的影响'}
+              {
+                '默认开启，统计连接建立后的请求往返时间，排除首次连接与握手耗时；关闭后计入首次连接开销'
+              }
             </Tooltip.Content>
           </Tooltip>
         }
@@ -115,7 +117,7 @@ const AdvancedSetting: React.FC = () => {
           onChange={(v) => {
             onChangeNeedRestart({ 'unified-delay': v })
           }}
-          aria-label="使用 RTT 延迟测试"
+          aria-label="统一延迟（RTT）"
         >
           <Switch.Content>
             <Switch.Control>

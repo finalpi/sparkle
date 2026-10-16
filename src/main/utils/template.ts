@@ -70,6 +70,7 @@ export const defaultConfig: AppConfig = {
   delayTestConcurrency: 50,
   delayTestUseGroupApi: false,
   delayTestUrlScope: 'group',
+  unifiedDelayMigrated: true,
   showProxyDetailTooltip: false
 }
 
@@ -90,7 +91,7 @@ export const defaultControledMihomoConfig: Partial<MihomoConfig> = {
   'redir-port': 0,
   'tproxy-port': 0,
   'allow-lan': false,
-  'unified-delay': false,
+  'unified-delay': true,
   'tcp-concurrent': false,
   'log-level': 'info',
   'find-process-mode': 'always',

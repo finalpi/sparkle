@@ -154,6 +154,11 @@ async function migration(): Promise<void> {
 
   const mihomoConfigPatch: Partial<MihomoConfig> = {}
 
+  // Switch existing installations to RTT once, while preserving later user choices.
+  if (appConfig.unifiedDelayMigrated !== true) {
+    mihomoConfigPatch['unified-delay'] = true
+  }
+
   for (const key in defaultControledMihomoConfig) {
     if (
       !(key in mihomoConfig) &&
@@ -183,6 +188,11 @@ async function migration(): Promise<void> {
   }
 
   const appConfigPatch: Partial<AppConfig> = {}
+
+  // Mark the migration only after the core configuration was saved successfully.
+  if (appConfig.unifiedDelayMigrated !== true) {
+    appConfigPatch.unifiedDelayMigrated = true
+  }
 
   for (const key in defaultConfig) {
     if (!(key in appConfig) && defaultConfig[key as keyof AppConfig] !== undefined) {
